@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -23,8 +23,9 @@ import {
 } from "@/components/ui/dialog";
 import { Plus, Search, Package, AlertCircle, CheckCircle2, Trash2, Loader2, Pencil } from "lucide-react";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/api"; // <--- Use helper
 
-// --- Types ---
+// ... (Types remain same)
 interface Product {
   _id: string;
   name: string;
@@ -36,27 +37,23 @@ interface Product {
 }
 
 const Products = () => {
-  // --- State ---
   const [products, setProducts] = useState<Product[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
   
-  // Dialog & Edit State
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<Product | null>(null); // Null = Add Mode, Object = Edit Mode
-
-  // --- API Actions ---
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null); 
 
   const fetchProducts = async () => {
     try {
-      const response = await fetch("http://localhost:5000/api/products");
+      const response = await apiFetch("http://localhost:5000/api/products"); // <--- Updated
       if (!response.ok) throw new Error("Failed to fetch");
       const data = await response.json();
       setProducts(data);
     } catch (error) {
       console.error("Error fetching products:", error);
-      toast.error("Could not load products. Is the backend running?");
+      toast.error("Could not load products.");
     } finally {
       setLoading(false);
     }
@@ -66,18 +63,16 @@ const Products = () => {
     fetchProducts();
   }, []);
 
-  // Handle Open Dialog
   const openAddDialog = () => {
-    setEditingProduct(null); // Reset to Add Mode
+    setEditingProduct(null); 
     setIsDialogOpen(true);
   };
 
   const openEditDialog = (product: Product) => {
-    setEditingProduct(product); // Set Edit Mode
+    setEditingProduct(product); 
     setIsDialogOpen(true);
   };
 
-  // Handle Save (Create or Update)
   const handleSaveProduct = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsSaving(true);
@@ -94,14 +89,13 @@ const Products = () => {
 
     try {
       const url = editingProduct 
-        ? `http://localhost:5000/api/products/${editingProduct._id}` // Edit URL
-        : "http://localhost:5000/api/products";                      // Add URL
+        ? `http://localhost:5000/api/products/${editingProduct._id}` 
+        : "http://localhost:5000/api/products";                      
       
       const method = editingProduct ? "PUT" : "POST";
 
-      const response = await fetch(url, {
+      const response = await apiFetch(url, { // <--- Updated
         method: method,
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(productData),
       });
 
@@ -110,7 +104,7 @@ const Products = () => {
       if (response.ok) {
         toast.success(editingProduct ? "Product updated!" : "Product added!");
         setIsDialogOpen(false);
-        fetchProducts(); // Refresh list
+        fetchProducts(); 
       } else {
         toast.error(data.message || "Operation failed");
       }
@@ -125,7 +119,7 @@ const Products = () => {
     if (!confirm("Are you sure you want to delete this product?")) return;
 
     try {
-      const response = await fetch(`http://localhost:5000/api/products/${id}`, {
+      const response = await apiFetch(`http://localhost:5000/api/products/${id}`, { // <--- Updated
         method: "DELETE",
       });
 
@@ -140,7 +134,7 @@ const Products = () => {
     }
   };
 
-  // --- Helpers ---
+  // ... (Rest of UI remains identical, filteredProducts logic etc.)
   const filteredProducts = products.filter(product =>
     product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     product.sku.toLowerCase().includes(searchQuery.toLowerCase())
@@ -154,14 +148,12 @@ const Products = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Products</h1>
           <p className="text-muted-foreground mt-1">Manage your inventory products</p>
         </div>
 
-        {/* ADD / EDIT DIALOG */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
             <Button className="shadow-soft" onClick={openAddDialog}>
@@ -177,76 +169,37 @@ const Products = () => {
               </DialogDescription>
             </DialogHeader>
             
-            {/* Key ensures form resets when switching between Add/Edit modes */}
             <form key={editingProduct ? editingProduct._id : "new"} onSubmit={handleSaveProduct} className="space-y-4 py-2">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="name">Product Name</Label>
-                  <Input 
-                    id="name" 
-                    name="name" 
-                    defaultValue={editingProduct?.name} 
-                    placeholder="e.g. Steel Rod" 
-                    required 
-                  />
+                  <Input id="name" name="name" defaultValue={editingProduct?.name} placeholder="e.g. Steel Rod" required />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="sku">SKU / Code</Label>
-                  <Input 
-                    id="sku" 
-                    name="sku" 
-                    defaultValue={editingProduct?.sku} 
-                    placeholder="e.g. SR-100" 
-                    required 
-                  />
+                  <Input id="sku" name="sku" defaultValue={editingProduct?.sku} placeholder="e.g. SR-100" required />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="category">Category</Label>
-                  <Input 
-                    id="category" 
-                    name="category" 
-                    defaultValue={editingProduct?.category} 
-                    placeholder="e.g. Raw Material" 
-                    required 
-                  />
+                  <Input id="category" name="category" defaultValue={editingProduct?.category} placeholder="e.g. Raw Material" required />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="unitOfMeasure">Unit (e.g. kg, pcs)</Label>
-                  <Input 
-                    id="unitOfMeasure" 
-                    name="unitOfMeasure" 
-                    defaultValue={editingProduct?.unitOfMeasure} 
-                    placeholder="kg" 
-                    required 
-                  />
+                  <Input id="unitOfMeasure" name="unitOfMeasure" defaultValue={editingProduct?.unitOfMeasure} placeholder="kg" required />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="quantity">Stock Quantity</Label>
-                  <Input 
-                    id="quantity" 
-                    name="quantity" 
-                    type="number" 
-                    defaultValue={editingProduct?.quantity ?? 0} 
-                    min="0" 
-                    required 
-                  />
+                  <Input id="quantity" name="quantity" type="number" defaultValue={editingProduct?.quantity ?? 0} min="0" required />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="minStock">Low Stock Alert</Label>
-                  <Input 
-                    id="minStock" 
-                    name="minStock" 
-                    type="number" 
-                    defaultValue={editingProduct?.minStock ?? 10} 
-                    min="0" 
-                    required 
-                  />
+                  <Input id="minStock" name="minStock" type="number" defaultValue={editingProduct?.minStock ?? 10} min="0" required />
                 </div>
               </div>
 
@@ -262,7 +215,6 @@ const Products = () => {
         </Dialog>
       </div>
 
-      {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-3">
         <Card className="shadow-soft">
           <CardHeader className="pb-2">
@@ -300,7 +252,6 @@ const Products = () => {
         </Card>
       </div>
 
-      {/* Data Table */}
       <Card className="shadow-soft">
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -353,7 +304,6 @@ const Products = () => {
                     <TableCell>{getStatusBadge(product.quantity, product.minStock)}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        {/* EDIT BUTTON */}
                         <Button 
                           variant="ghost" 
                           size="icon"
@@ -362,8 +312,6 @@ const Products = () => {
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        
-                        {/* DELETE BUTTON */}
                         <Button 
                           variant="ghost" 
                           size="icon" 

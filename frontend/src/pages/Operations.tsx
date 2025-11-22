@@ -19,8 +19,9 @@ import {
   MapPin
 } from "lucide-react";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/api"; // <--- Use helper
 
-// --- Types ---
+// ... (Types same as before)
 interface Product {
   _id: string;
   name: string;
@@ -51,28 +52,26 @@ const Operations = () => {
   const [operations, setOperations] = useState<Operation[]>([]); 
   const [loading, setLoading] = useState(true);
   
-  // Form State
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("receipts"); // receipts, deliveries, transfers, adjustments
+  const [activeTab, setActiveTab] = useState("receipts"); 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // New Order Fields
-  const [partyName, setPartyName] = useState(""); // Supplier/Customer/Reason
-  const [locFrom, setLocFrom] = useState(""); // For Transfer
-  const [locTo, setLocTo] = useState("");     // For Transfer
+  const [partyName, setPartyName] = useState(""); 
+  const [locFrom, setLocFrom] = useState(""); 
+  const [locTo, setLocTo] = useState("");     
   const [selectedProduct, setSelectedProduct] = useState("");
   const [qty, setQty] = useState(1);
   const [orderItems, setOrderItems] = useState<OperationItem[]>([]);
 
-  // --- 1. Fetch All Data ---
   const fetchData = async () => {
     try {
+      // Replace fetches with apiFetch
       const [prodRes, rcptRes, delRes, trfRes, adjRes] = await Promise.all([
-        fetch("http://localhost:5000/api/products"),
-        fetch("http://localhost:5000/api/receipts"),
-        fetch("http://localhost:5000/api/deliveries"),
-        fetch("http://localhost:5000/api/transfers"),
-        fetch("http://localhost:5000/api/adjustments")
+        apiFetch("http://localhost:5000/api/products"),
+        apiFetch("http://localhost:5000/api/receipts"),
+        apiFetch("http://localhost:5000/api/deliveries"),
+        apiFetch("http://localhost:5000/api/transfers"),
+        apiFetch("http://localhost:5000/api/adjustments")
       ]);
 
       if (prodRes.ok) setProducts(await prodRes.json());
@@ -83,7 +82,6 @@ const Operations = () => {
       if (trfRes.ok) allOps.push(...(await trfRes.json()).map((i: any) => ({ ...i, type: 'transfer' })));
       if (adjRes.ok) allOps.push(...(await adjRes.json()).map((i: any) => ({ ...i, type: 'adjustment' })));
 
-      // Sort by date (newest first)
       setOperations(allOps.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
 
     } catch (error) {
@@ -98,7 +96,7 @@ const Operations = () => {
     fetchData();
   }, []);
 
-  // --- 2. Form Logic ---
+  // ... (addItem and removeItem Logic remains same)
   const addItem = () => {
     if (!selectedProduct || qty === 0) return;
     const prod = products.find(p => p._id === selectedProduct);
@@ -147,16 +145,15 @@ const Operations = () => {
     }
 
     try {
-      const res = await fetch(`http://localhost:5000${endpoint}`, {
+      // Updated to use apiFetch
+      const res = await apiFetch(`http://localhost:5000${endpoint}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
 
       if (res.ok) {
         toast.success("Operation created successfully!");
         setIsDialogOpen(false);
-        // Reset Form
         setPartyName(""); 
         setLocFrom(""); 
         setLocTo(""); 
@@ -182,9 +179,9 @@ const Operations = () => {
     if (type === 'transfer') endpoint = "/api/transfers";
 
     try {
-      const res = await fetch(`http://localhost:5000${endpoint}/${id}`, {
+      // Updated to use apiFetch
+      const res = await apiFetch(`http://localhost:5000${endpoint}/${id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "done" }),
       });
 
@@ -200,7 +197,7 @@ const Operations = () => {
     }
   };
 
-  // --- 3. UI Helpers ---
+  // ... (UI Helpers and Return JSX remain the same)
   const filteredOps = operations.filter(op => {
     if (activeTab === 'receipts') return op.type === 'receipt';
     if (activeTab === 'deliveries') return op.type === 'delivery';
@@ -238,7 +235,6 @@ const Operations = () => {
             </DialogHeader>
             
             <div className="space-y-4 py-4">
-              {/* Dynamic Fields based on Tab */}
               {activeTab === 'receipts' && (
                 <div className="space-y-2">
                   <Label>Supplier</Label>
@@ -276,16 +272,13 @@ const Operations = () => {
                 </div>
               )}
 
-              {/* Item Selector */}
               <div className="flex gap-2 items-end border-t pt-4 mt-4">
                 <div className="flex-1 space-y-2">
                   <Label>Product</Label>
                   <Select value={selectedProduct} onValueChange={setSelectedProduct}>
                     <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
                     <SelectContent>
-                      {products.map(p => (
-                        <SelectItem key={p._id} value={p._id}>{p.name} (Stock: {p.quantity})</SelectItem>
-                      ))}
+                      {products.map(p => <SelectItem key={p._id} value={p._id}>{p.name} (Stock: {p.quantity})</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -296,7 +289,6 @@ const Operations = () => {
                 <Button variant="secondary" onClick={addItem}>Add</Button>
               </div>
 
-              {/* Items List */}
               <div className="border rounded-md p-2 max-h-40 overflow-y-auto bg-muted/20">
                 {orderItems.length === 0 && <p className="text-sm text-center text-muted-foreground py-2">No items added</p>}
                 {orderItems.map((item, idx) => (

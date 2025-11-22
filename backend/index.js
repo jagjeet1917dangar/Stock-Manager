@@ -19,6 +19,7 @@ app.use(cors());
 app.use(express.json());
 
 // Database Connection
+// FIX: Added "/stockmaster" database name to prevent "Invalid scheme" error
 const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://jagjeetdangarcg_db_user:XnGXs5wUbVBRE2Ek@cluster0.gqm0mb6.mongodb.net/stockmaster?retryWrites=true&w=majority';
 
 mongoose.connect(MONGO_URI)
@@ -34,9 +35,17 @@ const transporter = nodemailer.createTransport({
   }
 });
 
+// --- MIDDLEWARE TO GET USER ID ---
+const getUserId = (req) => {
+  const userId = req.headers['x-user-id'];
+  // Note: In a real app, we would verify a JWT token here.
+  // For now, we trust the client sending their ID.
+  return userId;
+};
+
 // ================= ROUTES =================
 
-// --- AUTH ROUTES ---
+// --- AUTH ROUTES (No Change needed, they are global) ---
 app.post('/api/signup', async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -166,14 +175,20 @@ app.put('/api/user/:id', async (req, res) => {
   }
 });
 
-// --- PRODUCT ROUTES ---
+// --- PRODUCT ROUTES (User Specific) ---
 app.post('/api/products', async (req, res) => {
   try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
     const { name, sku, category, unitOfMeasure, quantity, minStock } = req.body;
-    const existing = await Product.findOne({ sku });
+    
+    // Check duplicate SKU ONLY for this user
+    const existing = await Product.findOne({ sku, userId });
     if (existing) return res.status(400).json({ message: 'Product SKU exists' });
     
     const product = new Product({
+      userId,
       name, sku, category, unitOfMeasure,
       quantity: quantity || 0,
       minStock: minStock || 10
@@ -187,7 +202,10 @@ app.post('/api/products', async (req, res) => {
 
 app.get('/api/products', async (req, res) => {
   try {
-    const products = await Product.find().sort({ createdAt: -1 });
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const products = await Product.find({ userId }).sort({ createdAt: -1 });
     res.json(products);
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
@@ -196,7 +214,13 @@ app.get('/api/products', async (req, res) => {
 
 app.put('/api/products/:id', async (req, res) => {
   try {
-    const updated = await Product.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const userId = getUserId(req);
+    const updated = await Product.findOneAndUpdate(
+      { _id: req.params.id, userId }, // Ensure user owns it
+      req.body, 
+      { new: true }
+    );
+    if (!updated) return res.status(404).json({ message: 'Product not found' });
     res.json(updated);
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
@@ -205,25 +229,30 @@ app.put('/api/products/:id', async (req, res) => {
 
 app.delete('/api/products/:id', async (req, res) => {
   try {
-    await Product.findByIdAndDelete(req.params.id);
+    const userId = getUserId(req);
+    const deleted = await Product.findOneAndDelete({ _id: req.params.id, userId });
+    if (!deleted) return res.status(404).json({ message: 'Product not found' });
     res.json({ message: 'Deleted' });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// --- RECEIPTS (IN) ---
+// --- RECEIPTS (User Specific) ---
 app.post('/api/receipts', async (req, res) => {
   try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
     const { supplier, items, status } = req.body;
     const enrichedItems = [];
     for (const item of items) {
-      const product = await Product.findById(item.productId);
+      const product = await Product.findOne({ _id: item.productId, userId }); // Check ownership
       if (!product) return res.status(404).json({ message: 'Product not found' });
       enrichedItems.push({ productId: item.productId, name: product.name, quantity: item.quantity });
     }
 
-    const receipt = new Receipt({ supplier, items: enrichedItems, status: status || 'draft' });
+    const receipt = new Receipt({ userId, supplier, items: enrichedItems, status: status || 'draft' });
     
     if (status === 'done') {
       for (const item of enrichedItems) {
@@ -238,14 +267,20 @@ app.post('/api/receipts', async (req, res) => {
 });
 
 app.get('/api/receipts', async (req, res) => {
-  const receipts = await Receipt.find().sort({ date: -1 });
+  const userId = getUserId(req);
+  if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+  const receipts = await Receipt.find({ userId }).sort({ date: -1 });
   res.json(receipts);
 });
 
 app.put('/api/receipts/:id', async (req, res) => {
   try {
+    const userId = getUserId(req);
     const { status } = req.body;
-    const receipt = await Receipt.findById(req.params.id);
+    const receipt = await Receipt.findOne({ _id: req.params.id, userId });
+    
+    if (!receipt) return res.status(404).json({ message: 'Receipt not found' });
+
     if (receipt.status !== 'done' && status === 'done') {
       for (const item of receipt.items) {
         await Product.findByIdAndUpdate(item.productId, { $inc: { quantity: item.quantity } });
@@ -258,13 +293,16 @@ app.put('/api/receipts/:id', async (req, res) => {
   }
 });
 
-// --- DELIVERIES (OUT) ---
+// --- DELIVERIES (User Specific) ---
 app.post('/api/deliveries', async (req, res) => {
   try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
     const { customer, items, status } = req.body;
     const enrichedItems = [];
     for (const item of items) {
-      const product = await Product.findById(item.productId);
+      const product = await Product.findOne({ _id: item.productId, userId });
       if (!product) return res.status(404).json({ message: 'Product not found' });
       enrichedItems.push({ productId: item.productId, name: product.name, quantity: item.quantity });
     }
@@ -277,7 +315,7 @@ app.post('/api/deliveries', async (req, res) => {
         await p.save();
       }
     }
-    const delivery = new Delivery({ customer, items: enrichedItems, status: status || 'draft' });
+    const delivery = new Delivery({ userId, customer, items: enrichedItems, status: status || 'draft' });
     await delivery.save();
     res.status(201).json(delivery);
   } catch (error) {
@@ -286,14 +324,19 @@ app.post('/api/deliveries', async (req, res) => {
 });
 
 app.get('/api/deliveries', async (req, res) => {
-  const deliveries = await Delivery.find().sort({ date: -1 });
+  const userId = getUserId(req);
+  if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+  const deliveries = await Delivery.find({ userId }).sort({ date: -1 });
   res.json(deliveries);
 });
 
 app.put('/api/deliveries/:id', async (req, res) => {
   try {
+    const userId = getUserId(req);
     const { status } = req.body;
-    const delivery = await Delivery.findById(req.params.id);
+    const delivery = await Delivery.findOne({ _id: req.params.id, userId });
+    
+    if (!delivery) return res.status(404).json({ message: 'Delivery not found' });
     
     if (delivery.status !== 'done' && status === 'done') {
       for (const item of delivery.items) {
@@ -311,13 +354,17 @@ app.put('/api/deliveries/:id', async (req, res) => {
   }
 });
 
-// --- ADJUSTMENTS ---
+// --- ADJUSTMENTS (User Specific) ---
 app.post('/api/adjustments', async (req, res) => {
   try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
     const { reason, items } = req.body;
     const enrichedItems = [];
     for (const item of items) {
-      const product = await Product.findById(item.productId);
+      const product = await Product.findOne({ _id: item.productId, userId });
+      if (!product) return res.status(404).json({ message: 'Product not found' });
       enrichedItems.push({ productId: item.productId, name: product.name, quantity: Number(item.quantity) });
     }
 
@@ -325,7 +372,7 @@ app.post('/api/adjustments', async (req, res) => {
       await Product.findByIdAndUpdate(item.productId, { $inc: { quantity: item.quantity } });
     }
 
-    const adjustment = new Adjustment({ reason, items: enrichedItems });
+    const adjustment = new Adjustment({ userId, reason, items: enrichedItems });
     await adjustment.save();
     res.status(201).json(adjustment);
   } catch (error) {
@@ -334,18 +381,22 @@ app.post('/api/adjustments', async (req, res) => {
 });
 
 app.get('/api/adjustments', async (req, res) => {
-  const adjustments = await Adjustment.find().sort({ date: -1 });
+  const userId = getUserId(req);
+  if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+  const adjustments = await Adjustment.find({ userId }).sort({ date: -1 });
   res.json(adjustments);
 });
 
-// --- TRANSFERS (MOVE) ---
+// --- TRANSFERS (User Specific) ---
 app.post('/api/transfers', async (req, res) => {
   try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
     const { fromLocation, toLocation, items, status } = req.body;
-    
     const enrichedItems = [];
     for (const item of items) {
-      const product = await Product.findById(item.productId);
+      const product = await Product.findOne({ _id: item.productId, userId });
       if (!product) return res.status(404).json({ message: 'Product not found' });
       enrichedItems.push({ productId: item.productId, name: product.name, quantity: item.quantity });
     }
@@ -357,7 +408,7 @@ app.post('/api/transfers', async (req, res) => {
       }
     }
 
-    const transfer = new Transfer({ fromLocation, toLocation, items: enrichedItems, status: status || 'draft' });
+    const transfer = new Transfer({ userId, fromLocation, toLocation, items: enrichedItems, status: status || 'draft' });
     await transfer.save();
     res.status(201).json(transfer);
   } catch (error) {
@@ -366,15 +417,20 @@ app.post('/api/transfers', async (req, res) => {
 });
 
 app.get('/api/transfers', async (req, res) => {
-  const transfers = await Transfer.find().sort({ date: -1 });
+  const userId = getUserId(req);
+  if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+  const transfers = await Transfer.find({ userId }).sort({ date: -1 });
   res.json(transfers);
 });
 
 app.put('/api/transfers/:id', async (req, res) => {
   try {
+    const userId = getUserId(req);
     const { status } = req.body;
-    const transfer = await Transfer.findById(req.params.id);
+    const transfer = await Transfer.findOne({ _id: req.params.id, userId });
     
+    if (!transfer) return res.status(404).json({ message: 'Transfer not found' });
+
     if (transfer.status !== 'done' && status === 'done') {
        for (const item of transfer.items) {
         const p = await Product.findById(item.productId);

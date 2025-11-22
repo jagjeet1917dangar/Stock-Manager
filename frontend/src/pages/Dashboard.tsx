@@ -5,8 +5,9 @@ import { Package, AlertTriangle, ArrowDownToLine, ArrowUpFromLine, TrendingUp, T
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/api"; // <--- Import
 
-// --- Types ---
+// ... (Types & Constants remain same)
 interface Product {
   _id: string;
   name: string;
@@ -38,25 +39,22 @@ interface Delivery {
   items: Item[];
 }
 
-// --- Chart Colors ---
 const COLORS = ["hsl(var(--primary))", "hsl(var(--accent))", "hsl(var(--warning))", "hsl(var(--destructive))", "#8884d8"];
 
 const Dashboard = () => {
-  // --- State ---
   const [products, setProducts] = useState<Product[]>([]);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // --- Fetch Data ---
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Run all fetches in parallel for speed
+        // Update URLs to use apiFetch which handles headers
         const [prodRes, receiptRes, deliveryRes] = await Promise.all([
-          fetch("http://localhost:5000/api/products"),
-          fetch("http://localhost:5000/api/receipts"),
-          fetch("http://localhost:5000/api/deliveries")
+          apiFetch("http://localhost:5000/api/products"),
+          apiFetch("http://localhost:5000/api/receipts"),
+          apiFetch("http://localhost:5000/api/deliveries")
         ]);
 
         if (prodRes.ok) setProducts(await prodRes.json());
@@ -74,9 +72,10 @@ const Dashboard = () => {
     fetchData();
   }, []);
 
-  // --- Calculate Chart Data (Dynamic) ---
+  // ... (Rest of file remains EXACTLY the same as previous version, just logic)
+  
+  // --- Calculate Chart Data ---
   const chartData = useMemo(() => {
-    // Initialize structure for Mon-Sun
     const data = [
       { name: "Mon", receipts: 0, deliveries: 0 },
       { name: "Tue", receipts: 0, deliveries: 0 },
@@ -87,20 +86,17 @@ const Dashboard = () => {
       { name: "Sun", receipts: 0, deliveries: 0 },
     ];
 
-    // Helper to map JS Day (0=Sun) to Array Index (0=Mon ... 6=Sun)
     const getDayIndex = (dateStr: string) => {
-      const day = new Date(dateStr).getDay(); // 0 is Sunday
-      return (day + 6) % 7; // Shift so 0 is Monday
+      const day = new Date(dateStr).getDay(); 
+      return (day + 6) % 7; 
     };
 
-    // Sum Receipts
     receipts.forEach(r => {
       const idx = getDayIndex(r.date);
       const totalQty = r.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
       data[idx].receipts += totalQty;
     });
 
-    // Sum Deliveries
     deliveries.forEach(d => {
       const idx = getDayIndex(d.date);
       const totalQty = d.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
@@ -110,13 +106,11 @@ const Dashboard = () => {
     return data;
   }, [receipts, deliveries]);
 
-  // --- Calculate KPIs ---
   const totalProducts = products.length;
   const lowStockCount = products.filter(p => p.quantity > 0 && p.quantity <= p.minStock).length;
   const pendingReceiptsCount = receipts.filter(r => r.status !== "done").length;
   const pendingDeliveriesCount = deliveries.filter(d => d.status !== "done").length;
 
-  // Pie Chart Data
   const categoryStats = products.reduce((acc: Record<string, number>, curr) => {
     acc[curr.category] = (acc[curr.category] || 0) + curr.quantity;
     return acc;
@@ -127,18 +121,10 @@ const Dashboard = () => {
     value: categoryStats[key],
   }));
 
-  // Recent Activity Feed
   const recentActivity = [...receipts, ...deliveries]
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, 5)
     .map(item => {
-      const isReceipt = item.type === 'receipt'; // Note: ensure backend sends 'type' or infer it
-      // Inference fallback if 'type' is missing from API response (depends on model)
-      // But we can infer based on properties or just check the array source if we processed differently.
-      // For now, let's assume we cast it correctly or backend sends it. 
-      // Actually, backend Mongoose models have default type='receipt'/'delivery', so it should be there.
-      
-      // Safe check for type if not present (optional robustness)
       const type = (item as any).type || (Object.prototype.hasOwnProperty.call(item, 'supplier') ? 'receipt' : 'delivery');
       const partyName = type === 'receipt' ? (item as Receipt).supplier : (item as Delivery).customer;
       
@@ -155,7 +141,6 @@ const Dashboard = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
@@ -175,10 +160,7 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* KPI Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        
-        {/* Total Products */}
         <Card className="shadow-soft hover:shadow-medium transition-smooth border-l-4 border-l-primary">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Total Products</CardTitle>
@@ -193,7 +175,6 @@ const Dashboard = () => {
           </CardContent>
         </Card>
 
-        {/* Low Stock */}
         <Card className="shadow-soft hover:shadow-medium transition-smooth border-l-4 border-l-warning">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Low Stock Items</CardTitle>
@@ -208,7 +189,6 @@ const Dashboard = () => {
           </CardContent>
         </Card>
 
-        {/* Pending Receipts */}
         <Card className="shadow-soft hover:shadow-medium transition-smooth border-l-4 border-l-accent">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Pending Receipts</CardTitle>
@@ -222,7 +202,6 @@ const Dashboard = () => {
           </CardContent>
         </Card>
 
-        {/* Pending Deliveries */}
         <Card className="shadow-soft hover:shadow-medium transition-smooth border-l-4 border-l-destructive">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Pending Deliveries</CardTitle>
@@ -237,9 +216,7 @@ const Dashboard = () => {
         </Card>
       </div>
 
-      {/* Charts Row */}
       <div className="grid gap-4 lg:grid-cols-7">
-        {/* Bar Chart - Now Dynamic */}
         <Card className="lg:col-span-4 shadow-soft">
           <CardHeader>
             <CardTitle>Stock Movement (This Week)</CardTitle>
@@ -266,7 +243,6 @@ const Dashboard = () => {
           </CardContent>
         </Card>
 
-        {/* Pie Chart */}
         <Card className="lg:col-span-3 shadow-soft">
           <CardHeader>
             <CardTitle>Stock by Category</CardTitle>
@@ -296,7 +272,6 @@ const Dashboard = () => {
         </Card>
       </div>
 
-      {/* Recent Activity List */}
       <Card className="shadow-soft">
         <CardHeader>
           <CardTitle>Recent Activity</CardTitle>

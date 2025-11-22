@@ -19,8 +19,9 @@ import {
   Loader2 
 } from "lucide-react";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/api"; // <--- Import
 
-// --- Types ---
+// ... (Types remain the same)
 interface OperationItem {
   productId: string;
   quantity: number;
@@ -42,15 +43,15 @@ const History = () => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // --- Fetch & Normalize Data ---
   useEffect(() => {
     const fetchData = async () => {
       try {
+        // Update fetches to apiFetch
         const [rcptRes, delRes, trfRes, adjRes] = await Promise.all([
-          fetch("http://localhost:5000/api/receipts"),
-          fetch("http://localhost:5000/api/deliveries"),
-          fetch("http://localhost:5000/api/transfers"),
-          fetch("http://localhost:5000/api/adjustments")
+          apiFetch("http://localhost:5000/api/receipts"),
+          apiFetch("http://localhost:5000/api/deliveries"),
+          apiFetch("http://localhost:5000/api/transfers"),
+          apiFetch("http://localhost:5000/api/adjustments")
         ]);
 
         const combinedHistory: HistoryItem[] = [];
@@ -121,7 +122,7 @@ const History = () => {
     fetchData();
   }, []);
 
-  // --- Helpers ---
+  // ... (Helpers remain the same)
   const getIcon = (type: string) => {
     switch (type) {
       case 'receipt': return <ArrowDownToLine className="h-4 w-4 text-accent" />;
@@ -136,7 +137,6 @@ const History = () => {
     return status === 'done' ? 'default' : 'secondary';
   };
 
-  // SAFE Filter Logic
   const filteredHistory = history.filter(item => {
     const query = searchQuery.toLowerCase();
     const refMatch = (item.reference || "").toLowerCase().includes(query);
@@ -148,13 +148,13 @@ const History = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-foreground">Move History</h1>
-        <p className="text-muted-foreground mt-1">Complete ledger of all inventory movements</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">Move History</h1>
+          <p className="text-muted-foreground mt-1">Complete ledger of all inventory movements</p>
+        </div>
       </div>
 
-      {/* Search */}
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
@@ -165,7 +165,6 @@ const History = () => {
         />
       </div>
 
-      {/* History Table */}
       <Card className="shadow-soft">
         <CardHeader>
           <CardTitle>All Transactions</CardTitle>
@@ -218,7 +217,7 @@ const History = () => {
                       </div>
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">
-                      {new Date(item.date).toLocaleDateString()}
+                      {new Date(item.date).toLocaleDateString()} {new Date(item.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                     </TableCell>
                     <TableCell className="text-right">
                       <Badge variant={getBadgeVariant(item.status)}>

@@ -18,7 +18,9 @@ import {
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useNavigate } from "react-router-dom";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { apiFetch } from "@/lib/api"; // <--- Import
 
+// ... (Interfaces remain the same)
 interface Product {
   _id: string;
   name: string;
@@ -42,7 +44,8 @@ export const AppHeader = () => {
   useEffect(() => {
     const checkStockLevels = async () => {
       try {
-        const res = await fetch("http://localhost:5000/api/products");
+        // Use apiFetch to include x-user-id header
+        const res = await apiFetch("http://localhost:5000/api/products");
         if (res.ok) {
           const products: Product[] = await res.json();
           const newNotifications: Notification[] = [];
@@ -76,11 +79,11 @@ export const AppHeader = () => {
     };
 
     checkStockLevels();
-    // Poll every minute for updates
     const interval = setInterval(checkStockLevels, 60000);
     return () => clearInterval(interval);
   }, []);
 
+  // ... (Rest of the component remains EXACTLY same)
   const markAllRead = () => {
     setUnreadCount(0);
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
