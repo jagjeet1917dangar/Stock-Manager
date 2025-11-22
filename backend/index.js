@@ -574,5 +574,72 @@ app.delete('/api/locations/:id', async (req, res) => {
   }
 });
 
+// --- ADJUSTMENTS (User Specific) ---
+app.post('/api/adjustments', async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+    const { reason, items, locationName } = req.body;
+    
+    // 1. Determine which location we are counting
+    let targetLoc;
+    if (locationName) {
+      targetLoc = await Location.findOne({ userId, name: locationName });
+    }
+    // Fallback to default if none selected
+    if (!targetLoc) {
+      targetLoc = await Location.findOne({ userId, isDefault: true });
+    }
+    if (!targetLoc) return res.status(400).json({ message: "Location not found" });
+
+    const adjustmentItems = []; // We will store the DIFFERENCE here for history
+
+    for (const item of items) {
+      const product = await Product.findOne({ _id: item.productId, userId });
+      if (!product) return res.status(404).json({ message: `Product not found: ${item.productId}` });
+
+      // 2. Get Current Stock at this location
+      const currentStockEntry = product.stock.find(s => s.locationId.toString() === targetLoc._id.toString());
+      const currentQty = currentStockEntry ? currentStockEntry.quantity : 0;
+
+      // 3. Calculate Difference (Physical Count - System Qty)
+      // Example: Counted 8, System has 10. Diff = -2.
+      const countedQty = Number(item.quantity);
+      const difference = countedQty - currentQty;
+
+      if (difference !== 0) {
+        // 4. Update Stock with the Difference
+        await updateProductStock(product._id, targetLoc._id, difference);
+        
+        // 5. Record the Difference in the Ledger (so we know what changed)
+        adjustmentItems.push({
+          productId: item.productId,
+          name: product.name,
+          quantity: difference // Storing -2, not 8
+        });
+      }
+    }
+
+    // Only save adjustment if there were actual changes
+    if (adjustmentItems.length > 0) {
+      const adjustment = new Adjustment({ 
+        userId, 
+        reason, 
+        items: adjustmentItems,
+        location: targetLoc.name // Optional: You might need to add 'location' field to Adjustment Model if you want to see it later
+      });
+      await adjustment.save();
+      res.status(201).json(adjustment);
+    } else {
+      res.status(200).json({ message: "No changes needed. Counts matched system stock." });
+    }
+
+  } catch (error) {
+    console.error("Adjustment Error:", error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

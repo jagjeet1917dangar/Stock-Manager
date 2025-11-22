@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom"; // <--- NEW IMPORT
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"; // <--- NEW IMPORT
 import {
   Table,
   TableBody,
@@ -26,7 +28,7 @@ import {
   DialogTitle, 
   DialogTrigger 
 } from "@/components/ui/dialog";
-import { Plus, Search, Package, AlertCircle, CheckCircle2, Trash2, Loader2, Pencil, Warehouse } from "lucide-react";
+import { Plus, Search, Package, AlertCircle, CheckCircle2, Trash2, Loader2, Pencil, Warehouse, Filter } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/api";
 
@@ -48,17 +50,27 @@ interface Product {
   quantity: number;
   minStock: number;
   unitOfMeasure: string;
-  stock: StockEntry[]; // <--- New Field
+  stock: StockEntry[];
 }
 
 const Products = () => {
+  const [searchParams, setSearchParams] = useSearchParams(); // <--- URL Params hook
   const [products, setProducts] = useState<Product[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all"); // <--- Local Filter State
   const [loading, setLoading] = useState(true);
   
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null); 
+
+  // Sync URL param with Local State on load
+  useEffect(() => {
+    const filterParam = searchParams.get("filter");
+    if (filterParam) {
+      setStatusFilter(filterParam);
+    }
+  }, [searchParams]);
 
   const fetchProducts = async () => {
     try {
@@ -98,7 +110,7 @@ const Products = () => {
       sku: formData.get("sku"),
       category: formData.get("category"),
       unitOfMeasure: formData.get("unitOfMeasure"),
-      quantity: Number(formData.get("quantity")), // Initial Global Qty
+      quantity: Number(formData.get("quantity")), 
       minStock: Number(formData.get("minStock")),
     };
 
@@ -145,10 +157,29 @@ const Products = () => {
     }
   };
 
-  const filteredProducts = products.filter(product =>
-    product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    product.sku.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // --- FILTER LOGIC ---
+  const filteredProducts = products.filter(product => {
+    // 1. Text Search
+    const matchesSearch = 
+      product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      product.sku.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    // 2. Status Filter
+    let matchesStatus = true;
+    if (statusFilter === "low") {
+      matchesStatus = product.quantity > 0 && product.quantity <= product.minStock;
+    } else if (statusFilter === "out") {
+      matchesStatus = product.quantity === 0;
+    }
+
+    return matchesSearch && matchesStatus;
+  });
+
+  // Update URL when filter changes (optional, but good for bookmarking)
+  const handleFilterChange = (val: string) => {
+    setStatusFilter(val);
+    setSearchParams(val === 'all' ? {} : { filter: val });
+  };
 
   const getStatusBadge = (qty: number, minStock: number) => {
     if (qty === 0) return <Badge variant="destructive"><AlertCircle className="h-3 w-3 mr-1" />Out of Stock</Badge>;
@@ -179,6 +210,7 @@ const Products = () => {
             </DialogHeader>
             
             <form key={editingProduct ? editingProduct._id : "new"} onSubmit={handleSaveProduct} className="space-y-4 py-2">
+              {/* Form fields same as before... */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="name">Product Name</Label>
@@ -210,7 +242,6 @@ const Products = () => {
                     type="number" 
                     defaultValue={editingProduct?.quantity ?? 0} 
                     min="0" 
-                    // Disable editing qty directly to force use of Operations (Receipts/Adjustments)
                     disabled={!!editingProduct} 
                     className={editingProduct ? "bg-muted" : ""}
                   />
@@ -234,8 +265,12 @@ const Products = () => {
         </Dialog>
       </div>
 
+      {/* --- UPDATED: KPI Cards now act as filters --- */}
       <div className="grid gap-4 md:grid-cols-3">
-        <Card className="shadow-soft">
+        <Card 
+          className={`shadow-soft cursor-pointer transition-all ${statusFilter === 'all' ? 'ring-2 ring-primary' : 'hover:bg-muted/50'}`}
+          onClick={() => handleFilterChange('all')}
+        >
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center">
               <Package className="h-4 w-4 mr-2 text-primary" /> Total Products
@@ -245,7 +280,10 @@ const Products = () => {
             <div className="text-2xl font-bold">{products.length}</div>
           </CardContent>
         </Card>
-        <Card className="shadow-soft">
+        <Card 
+          className={`shadow-soft cursor-pointer transition-all ${statusFilter === 'low' ? 'ring-2 ring-warning' : 'hover:bg-muted/50'}`}
+          onClick={() => handleFilterChange('low')}
+        >
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center">
               <AlertCircle className="h-4 w-4 mr-2 text-warning" /> Low Stock
@@ -257,7 +295,10 @@ const Products = () => {
             </div>
           </CardContent>
         </Card>
-        <Card className="shadow-soft">
+        <Card 
+          className={`shadow-soft cursor-pointer transition-all ${statusFilter === 'out' ? 'ring-2 ring-destructive' : 'hover:bg-muted/50'}`}
+          onClick={() => handleFilterChange('out')}
+        >
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center">
               <AlertCircle className="h-4 w-4 mr-2 text-destructive" /> Out of Stock
@@ -274,15 +315,37 @@ const Products = () => {
       <Card className="shadow-soft">
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle>Product List</CardTitle>
-            <div className="relative w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9"
-              />
+            <div className="flex items-center gap-2">
+              <CardTitle>Product List</CardTitle>
+              {statusFilter !== 'all' && (
+                <Badge variant="outline" className="uppercase">
+                  Filtered: {statusFilter === 'low' ? 'Low Stock' : 'Out of Stock'}
+                </Badge>
+              )}
+            </div>
+            <div className="flex gap-2">
+              {/* --- NEW: Filter Dropdown --- */}
+              <Select value={statusFilter} onValueChange={handleFilterChange}>
+                <SelectTrigger className="w-[140px]">
+                  <Filter className="w-4 h-4 mr-2 text-muted-foreground" />
+                  <SelectValue placeholder="Filter" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Items</SelectItem>
+                  <SelectItem value="low">Low Stock</SelectItem>
+                  <SelectItem value="out">Out of Stock</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <div className="relative w-64">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
             </div>
           </div>
         </CardHeader>
@@ -315,7 +378,7 @@ const Products = () => {
                     <TableCell className="text-muted-foreground">{product.sku}</TableCell>
                     <TableCell>{product.category}</TableCell>
                     
-                    {/* --- NEW: Hover to see Breakdown --- */}
+                    {/* Hover to see Breakdown */}
                     <TableCell className="text-right font-semibold cursor-help">
                       <HoverCard>
                         <HoverCardTrigger asChild>
@@ -344,7 +407,6 @@ const Products = () => {
                         </HoverCardContent>
                       </HoverCard>
                     </TableCell>
-                    {/* ----------------------------------- */}
 
                     <TableCell className="text-right text-muted-foreground">{product.minStock}</TableCell>
                     <TableCell>{getStatusBadge(product.quantity, product.minStock)}</TableCell>

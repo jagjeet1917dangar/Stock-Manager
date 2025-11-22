@@ -24,7 +24,7 @@ import { apiFetch } from "@/lib/api";
 interface Product {
   _id: string;
   name: string;
-  quantity: number; // Global Quantity
+  quantity: number;
 }
 
 interface Location {
@@ -47,6 +47,7 @@ interface Operation {
   fromLocation?: string;
   toLocation?: string;
   reason?: string;
+  location?: string; // Added for adjustments
   items: OperationItem[];
   status?: 'draft' | 'done';
   date: string;
@@ -101,7 +102,7 @@ const Operations = () => {
   }, []);
 
   const addItem = () => {
-    if (!selectedProduct || qty <= 0) return;
+    if (!selectedProduct || qty < 0) return; // Allow 0 for adjustments
     const prod = products.find(p => p._id === selectedProduct);
     if (!prod) return;
     
@@ -137,13 +138,9 @@ const Operations = () => {
         break;
       case "transfers":
         endpoint = "/api/transfers";
-        // Look up the names from the IDs for the backend (or update backend to take IDs)
-        // Assuming Backend expects Names based on previous code, 
-        // BUT better to send Names if that's what the model expects.
-        // Let's send Names as string to match the Transfer Model provided earlier.
+        // Convert ID to Name for backend logic
         const fromLocObj = locations.find(l => l._id === locFrom);
         const toLocObj = locations.find(l => l._id === locTo);
-        
         body.fromLocation = fromLocObj ? fromLocObj.name : "";
         body.toLocation = toLocObj ? toLocObj.name : "";
         body.status = 'draft';
@@ -151,6 +148,9 @@ const Operations = () => {
       case "adjustments":
         endpoint = "/api/adjustments";
         body.reason = partyName;
+        // Use locFrom state to hold the Adjustment Location
+        const adjLocObj = locations.find(l => l._id === locFrom);
+        body.locationName = adjLocObj ? adjLocObj.name : ""; 
         break;
     }
 
@@ -186,6 +186,7 @@ const Operations = () => {
     if (type === 'receipt') endpoint = "/api/receipts";
     if (type === 'delivery') endpoint = "/api/deliveries";
     if (type === 'transfer') endpoint = "/api/transfers";
+    // Adjustments are auto-validated on creation in this logic
 
     try {
       const res = await apiFetch(`http://localhost:5000${endpoint}/${id}`, {
@@ -238,7 +239,11 @@ const Operations = () => {
           <DialogContent className="sm:max-w-[600px]">
             <DialogHeader>
               <DialogTitle className="capitalize">Create {activeTab.slice(0, -1)}</DialogTitle>
-              <DialogDescription>Enter details for this operation.</DialogDescription>
+              <DialogDescription>
+                {activeTab === 'adjustments' 
+                  ? "Enter the actual PHYSICAL COUNT. System will auto-adjust." 
+                  : "Enter details for this operation."}
+              </DialogDescription>
             </DialogHeader>
             
             <div className="space-y-4 py-4">
@@ -254,12 +259,26 @@ const Operations = () => {
                   <Input placeholder="Customer Name" value={partyName} onChange={(e) => setPartyName(e.target.value)} />
                 </div>
               )}
+              
+              {/* UPDATED: Adjustments now need a Location selector */}
               {activeTab === 'adjustments' && (
-                <div className="space-y-2">
-                  <Label>Reason</Label>
-                  <Input placeholder="e.g. Damaged Goods" value={partyName} onChange={(e) => setPartyName(e.target.value)} />
+                <div className="grid grid-cols-2 gap-4">
+                   <div className="space-y-2">
+                    <Label>Reason / Reference</Label>
+                    <Input placeholder="e.g. Monthly Count" value={partyName} onChange={(e) => setPartyName(e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Location to Count</Label>
+                    <Select value={locFrom} onValueChange={setLocFrom}>
+                      <SelectTrigger><SelectValue placeholder="Select Location" /></SelectTrigger>
+                      <SelectContent>
+                        {locations.map(l => <SelectItem key={l._id} value={l._id}>{l.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               )}
+
               {activeTab === 'transfers' && (
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -294,7 +313,7 @@ const Operations = () => {
                   </Select>
                 </div>
                 <div className="w-24 space-y-2">
-                  <Label>Qty</Label>
+                  <Label>{activeTab === 'adjustments' ? "Counted" : "Qty"}</Label>
                   <Input type="number" value={qty} onChange={(e) => setQty(Number(e.target.value))} />
                 </div>
                 <Button variant="secondary" onClick={addItem}>Add</Button>
@@ -306,7 +325,9 @@ const Operations = () => {
                   <div key={idx} className="flex justify-between items-center text-sm py-1 border-b last:border-0">
                     <span>{item.name}</span>
                     <div className="flex items-center gap-2">
-                      <Badge variant="outline">x{item.quantity}</Badge>
+                      <Badge variant="outline">
+                         {activeTab === 'adjustments' ? `Count: ${item.quantity}` : `x${item.quantity}`}
+                      </Badge>
                       <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => removeItem(idx)}>
                         <Trash2 className="h-3 w-3" />
                       </Button>
@@ -347,7 +368,7 @@ const Operations = () => {
                           {getIcon(op.type)}
                           {op.type === 'receipt' && op.supplier}
                           {op.type === 'delivery' && op.customer}
-                          {op.type === 'adjustment' && op.reason}
+                          {op.type === 'adjustment' && `${op.reason} (${op.location || 'Main'})`}
                           {op.type === 'transfer' && `${op.fromLocation} → ${op.toLocation}`}
                         </CardTitle>
                         <CardDescription>{new Date(op.date).toLocaleDateString()}</CardDescription>
@@ -372,7 +393,9 @@ const Operations = () => {
                     <div className="flex flex-wrap gap-2">
                       {op.items.map((i, idx) => (
                         <Badge key={idx} variant="outline" className="text-sm font-normal">
-                          {i.name} <span className="ml-1 font-semibold">x{i.quantity}</span>
+                          {i.name} <span className="ml-1 font-semibold">
+                             {op.type === 'adjustment' ? `Diff: ${i.quantity > 0 ? '+' : ''}${i.quantity}` : `x${i.quantity}`}
+                          </span>
                         </Badge>
                       ))}
                     </div>
