@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Package, AlertTriangle, ArrowDownToLine, ArrowUpFromLine, TrendingUp, TrendingDown } from "lucide-react";
@@ -38,9 +38,6 @@ interface Delivery {
   items: Item[];
 }
 
-// Union type for activity feed
-type Activity = Receipt | Delivery;
-
 // --- Chart Colors ---
 const COLORS = ["hsl(var(--primary))", "hsl(var(--accent))", "hsl(var(--warning))", "hsl(var(--destructive))", "#8884d8"];
 
@@ -62,17 +59,13 @@ const Dashboard = () => {
           fetch("http://localhost:5000/api/deliveries")
         ]);
 
-        const prodData = await prodRes.json();
-        const receiptData = await receiptRes.json();
-        const deliveryData = await deliveryRes.json();
-
-        if (prodRes.ok) setProducts(prodData);
-        if (receiptRes.ok) setReceipts(receiptData);
-        if (deliveryRes.ok) setDeliveries(deliveryData);
+        if (prodRes.ok) setProducts(await prodRes.json());
+        if (receiptRes.ok) setReceipts(await receiptRes.json());
+        if (deliveryRes.ok) setDeliveries(await deliveryRes.json());
 
       } catch (error) {
         console.error("Dashboard fetch error:", error);
-        toast.error("Failed to load dashboard data. Is backend running?");
+        toast.error("Failed to load dashboard data.");
       } finally {
         setIsLoading(false);
       }
@@ -81,19 +74,49 @@ const Dashboard = () => {
     fetchData();
   }, []);
 
-  // --- Calculate KPIs ---
-  
-  // 1. Product Stats
-  const totalProducts = products.length;
-  const lowStockCount = products.filter(
-    (p) => p.quantity > 0 && p.quantity <= p.minStock
-  ).length;
+  // --- Calculate Chart Data (Dynamic) ---
+  const chartData = useMemo(() => {
+    // Initialize structure for Mon-Sun
+    const data = [
+      { name: "Mon", receipts: 0, deliveries: 0 },
+      { name: "Tue", receipts: 0, deliveries: 0 },
+      { name: "Wed", receipts: 0, deliveries: 0 },
+      { name: "Thu", receipts: 0, deliveries: 0 },
+      { name: "Fri", receipts: 0, deliveries: 0 },
+      { name: "Sat", receipts: 0, deliveries: 0 },
+      { name: "Sun", receipts: 0, deliveries: 0 },
+    ];
 
-  // 2. Operation Stats (Pending = Not 'done')
+    // Helper to map JS Day (0=Sun) to Array Index (0=Mon ... 6=Sun)
+    const getDayIndex = (dateStr: string) => {
+      const day = new Date(dateStr).getDay(); // 0 is Sunday
+      return (day + 6) % 7; // Shift so 0 is Monday
+    };
+
+    // Sum Receipts
+    receipts.forEach(r => {
+      const idx = getDayIndex(r.date);
+      const totalQty = r.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
+      data[idx].receipts += totalQty;
+    });
+
+    // Sum Deliveries
+    deliveries.forEach(d => {
+      const idx = getDayIndex(d.date);
+      const totalQty = d.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
+      data[idx].deliveries += totalQty;
+    });
+
+    return data;
+  }, [receipts, deliveries]);
+
+  // --- Calculate KPIs ---
+  const totalProducts = products.length;
+  const lowStockCount = products.filter(p => p.quantity > 0 && p.quantity <= p.minStock).length;
   const pendingReceiptsCount = receipts.filter(r => r.status !== "done").length;
   const pendingDeliveriesCount = deliveries.filter(d => d.status !== "done").length;
 
-  // 3. Pie Chart Data (Stock by Category)
+  // Pie Chart Data
   const categoryStats = products.reduce((acc: Record<string, number>, curr) => {
     acc[curr.category] = (acc[curr.category] || 0) + curr.quantity;
     return acc;
@@ -104,36 +127,31 @@ const Dashboard = () => {
     value: categoryStats[key],
   }));
 
-  // 4. Recent Activity Feed (Merge Receipts & Deliveries)
+  // Recent Activity Feed
   const recentActivity = [...receipts, ...deliveries]
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    .slice(0, 5) // Top 5 most recent
+    .slice(0, 5)
     .map(item => {
-      const isReceipt = item.type === 'receipt'; // Determine type safely
-      const partyName = isReceipt ? (item as Receipt).supplier : (item as Delivery).customer;
+      const isReceipt = item.type === 'receipt'; // Note: ensure backend sends 'type' or infer it
+      // Inference fallback if 'type' is missing from API response (depends on model)
+      // But we can infer based on properties or just check the array source if we processed differently.
+      // For now, let's assume we cast it correctly or backend sends it. 
+      // Actually, backend Mongoose models have default type='receipt'/'delivery', so it should be there.
+      
+      // Safe check for type if not present (optional robustness)
+      const type = (item as any).type || (Object.prototype.hasOwnProperty.call(item, 'supplier') ? 'receipt' : 'delivery');
+      const partyName = type === 'receipt' ? (item as Receipt).supplier : (item as Delivery).customer;
       
       return {
         id: item._id,
-        type: isReceipt ? "receipt" : "delivery",
-        title: isReceipt ? `Received from ${partyName}` : `Delivered to ${partyName}`,
-        desc: `${item.items.length} items (${item.items.map(i => i.name).join(", ").slice(0, 30)}...)`,
-        qty: item.items.reduce((sum, i) => sum + i.quantity, 0),
+        type: type,
+        title: type === 'receipt' ? `Received from ${partyName}` : `Delivered to ${partyName}`,
+        desc: `${item.items?.length || 0} items`,
+        qty: item.items?.reduce((sum, i) => sum + i.quantity, 0) || 0,
         date: new Date(item.date).toLocaleDateString(),
         status: item.status
       };
     });
-
-  // 5. Bar Chart Data (Mocked slightly based on real counts for visualization)
-  // Note: Real daily history requires a separate "History/Log" collection which gathers data over time.
-  const stockChartData = [
-    { name: "Mon", receipts: 4, deliveries: 2 },
-    { name: "Tue", receipts: 3, deliveries: 5 },
-    { name: "Wed", receipts: 2, deliveries: 3 },
-    { name: "Thu", receipts: 6, deliveries: 4 },
-    { name: "Fri", receipts: 4, deliveries: 7 },
-    { name: "Sat", receipts: receipts.length, deliveries: deliveries.length }, // Showing total counts for "Today/Sat" as demo
-    { name: "Sun", receipts: 0, deliveries: 0 },
-  ];
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -221,15 +239,15 @@ const Dashboard = () => {
 
       {/* Charts Row */}
       <div className="grid gap-4 lg:grid-cols-7">
-        {/* Bar Chart */}
+        {/* Bar Chart - Now Dynamic */}
         <Card className="lg:col-span-4 shadow-soft">
           <CardHeader>
-            <CardTitle>Weekly Overview</CardTitle>
-            <p className="text-sm text-muted-foreground">Receipts vs Deliveries</p>
+            <CardTitle>Stock Movement (This Week)</CardTitle>
+            <p className="text-sm text-muted-foreground">Total items received vs delivered</p>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={stockChartData}>
+              <BarChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                 <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" />
                 <YAxis stroke="hsl(var(--muted-foreground))" />
@@ -241,8 +259,8 @@ const Dashboard = () => {
                   }}
                 />
                 <Legend />
-                <Bar dataKey="receipts" name="Receipts" fill="hsl(var(--accent))" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="deliveries" name="Deliveries" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="receipts" name="Received" fill="hsl(var(--accent))" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="deliveries" name="Delivered" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>

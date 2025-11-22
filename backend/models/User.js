@@ -21,6 +21,15 @@ const UserSchema = new mongoose.Schema({
   resetPasswordExpires: {
     type: Date,
   },
+  // --- New Fields for Settings ---
+  warehouseName: {
+    type: String,
+    default: "", // Initially empty
+  },
+  lowStockThreshold: {
+    type: Number,
+    default: 10, // Default value
+  },
   createdAt: {
     type: Date,
     default: Date.now,

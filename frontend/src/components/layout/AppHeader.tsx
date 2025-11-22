@@ -47,7 +47,6 @@ export const AppHeader = () => {
             <DropdownMenuItem onClick={() => navigate("/settings")}>
               Profile Settings
             </DropdownMenuItem>
-            <DropdownMenuItem>Team Settings</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => navigate("/")}>
               Logout

@@ -9,7 +9,7 @@ import Product from './models/Product.js';
 import Receipt from './models/Receipt.js';
 import Delivery from './models/Delivery.js';
 import Adjustment from './models/Adjustment.js';
-import Transfer from './models/Transfer.js'; // <--- Added Import
+import Transfer from './models/Transfer.js'; 
 
 dotenv.config();
 const app = express();
@@ -19,10 +19,11 @@ app.use(cors());
 app.use(express.json());
 
 // Database Connection
-const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://jagjeetdangarcg_db_user:XnGXs5wUbVBRE2Ek@cluster0.gqm0mb6.mongodb.net/';
+const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://jagjeetdangarcg_db_user:XnGXs5wUbVBRE2Ek@cluster0.gqm0mb6.mongodb.net/stockmaster?retryWrites=true&w=majority';
+
 mongoose.connect(MONGO_URI)
   .then(() => console.log('MongoDB Connected'))
-  .catch(err => console.error(err));
+  .catch(err => console.error('MongoDB Connection Error:', err));
 
 // --- NODEMAILER CONFIGURATION ---
 const transporter = nodemailer.createTransport({
@@ -33,53 +34,54 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-// --- ROUTES ---
+// ================= ROUTES =================
 
-// 1. Sign Up Route
+// --- AUTH ROUTES ---
 app.post('/api/signup', async (req, res) => {
   try {
     const { name, email, password } = req.body;
     const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({ message: 'User already exists' });
-    }
+    if (existingUser) return res.status(400).json({ message: 'User already exists' });
+
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
     const newUser = new User({ name, email, password: hashedPassword });
     await newUser.save();
     res.status(201).json({ message: 'User created successfully' });
   } catch (error) {
-    console.error(error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// 2. Login Route
 app.post('/api/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     const user = await User.findOne({ email });
-    if (!user) return res.status(400).json({ message: 'Invalid email or password' });
+    if (!user) return res.status(400).json({ message: 'Invalid credentials' });
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ message: 'Invalid email or password' });
+    if (!isMatch) return res.status(400).json({ message: 'Invalid credentials' });
 
     res.json({ 
       message: 'Login successful', 
-      user: { id: user._id, name: user.name, email: user.email } 
+      user: { 
+        id: user._id, 
+        name: user.name, 
+        email: user.email,
+        warehouseName: user.warehouseName,
+        lowStockThreshold: user.lowStockThreshold
+      } 
     });
   } catch (error) {
-    console.error(error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// 3. Forgot Password - Send OTP
 app.post('/api/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
     const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ message: 'User not found with this email' });
+    if (!user) return res.status(404).json({ message: 'User not found' });
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     user.resetPasswordOTP = otp;
@@ -90,20 +92,17 @@ app.post('/api/forgot-password', async (req, res) => {
       from: 'jagjeet.pareshd79@gmail.com',
       to: user.email,
       subject: 'StockMaster Password Reset OTP',
-      text: `Your OTP for password reset is: ${otp}. It is valid for 10 minutes.`
+      text: `Your OTP for password reset is: ${otp}`
     };
-
-    console.log(`DEBUG: OTP for ${email} is ${otp}`); 
+    
     await transporter.sendMail(mailOptions);
-
-    res.json({ message: 'OTP sent to your email' });
+    res.json({ message: 'OTP sent' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// 4. Verify OTP & Reset Password
 app.post('/api/reset-password', async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
@@ -113,17 +112,54 @@ app.post('/api/reset-password', async (req, res) => {
       resetPasswordExpires: { $gt: Date.now() }
     });
 
-    if (!user) return res.status(400).json({ message: 'Invalid or expired OTP' });
+    if (!user) return res.status(400).json({ message: 'Invalid OTP' });
 
     const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(newPassword, salt);
-
-    user.password = hashedPassword;
+    user.password = await bcrypt.hash(newPassword, salt);
     user.resetPasswordOTP = undefined;
     user.resetPasswordExpires = undefined;
     await user.save();
 
-    res.json({ message: 'Password has been reset successfully' });
+    res.json({ message: 'Password reset success' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// --- USER UPDATE ROUTE (Profile & Settings) ---
+app.put('/api/user/:id', async (req, res) => {
+  try {
+    const { name, email, password, warehouseName, lowStockThreshold } = req.body;
+    const user = await User.findById(req.params.id);
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    if (name) user.name = name;
+    if (email) user.email = email;
+    
+    if (password) {
+      const salt = await bcrypt.genSalt(10);
+      user.password = await bcrypt.hash(password, salt);
+    }
+
+    // Update Settings
+    if (warehouseName !== undefined) user.warehouseName = warehouseName;
+    if (lowStockThreshold !== undefined) user.lowStockThreshold = Number(lowStockThreshold);
+
+    await user.save();
+    
+    res.json({ 
+      message: 'Profile updated successfully', 
+      user: { 
+        id: user._id, 
+        name: user.name, 
+        email: user.email,
+        warehouseName: user.warehouseName,
+        lowStockThreshold: user.lowStockThreshold
+      } 
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
@@ -131,22 +167,20 @@ app.post('/api/reset-password', async (req, res) => {
 });
 
 // --- PRODUCT ROUTES ---
-
 app.post('/api/products', async (req, res) => {
   try {
     const { name, sku, category, unitOfMeasure, quantity, minStock } = req.body;
-    const existingProduct = await Product.findOne({ sku });
-    if (existingProduct) return res.status(400).json({ message: 'Product with this SKU already exists' });
-
-    const newProduct = new Product({
+    const existing = await Product.findOne({ sku });
+    if (existing) return res.status(400).json({ message: 'Product SKU exists' });
+    
+    const product = new Product({
       name, sku, category, unitOfMeasure,
       quantity: quantity || 0,
       minStock: minStock || 10
     });
-    await newProduct.save();
-    res.status(201).json({ message: 'Product created successfully', product: newProduct });
+    await product.save();
+    res.status(201).json({ message: 'Product created', product });
   } catch (error) {
-    console.error("Error creating product:", error);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -156,25 +190,14 @@ app.get('/api/products', async (req, res) => {
     const products = await Product.find().sort({ createdAt: -1 });
     res.json(products);
   } catch (error) {
-    console.error("Error fetching products:", error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-app.get('/api/products/:id', async (req, res) => {
-  try {
-    const product = await Product.findById(req.params.id);
-    if (!product) return res.status(404).json({ message: 'Product not found' });
-    res.json(product);
-  } catch (error) {
     res.status(500).json({ message: 'Server error' });
   }
 });
 
 app.put('/api/products/:id', async (req, res) => {
   try {
-    const updatedProduct = await Product.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    res.json(updatedProduct);
+    const updated = await Product.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    res.json(updated);
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
   }
@@ -183,184 +206,139 @@ app.put('/api/products/:id', async (req, res) => {
 app.delete('/api/products/:id', async (req, res) => {
   try {
     await Product.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Product deleted successfully' });
+    res.json({ message: 'Deleted' });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// --- RECEIPT ROUTES (Incoming Stock) ---
-
+// --- RECEIPTS (IN) ---
 app.post('/api/receipts', async (req, res) => {
   try {
     const { supplier, items, status } = req.body;
     const enrichedItems = [];
     for (const item of items) {
       const product = await Product.findById(item.productId);
-      if (!product) return res.status(404).json({ message: `Product ID ${item.productId} not found` });
-      enrichedItems.push({
-        productId: item.productId,
-        name: product.name,
-        quantity: item.quantity
-      });
+      if (!product) return res.status(404).json({ message: 'Product not found' });
+      enrichedItems.push({ productId: item.productId, name: product.name, quantity: item.quantity });
     }
 
-    const newReceipt = new Receipt({ supplier, items: enrichedItems, status: status || 'draft' });
-
+    const receipt = new Receipt({ supplier, items: enrichedItems, status: status || 'draft' });
+    
     if (status === 'done') {
       for (const item of enrichedItems) {
         await Product.findByIdAndUpdate(item.productId, { $inc: { quantity: item.quantity } });
       }
     }
-    await newReceipt.save();
-    res.status(201).json({ message: 'Receipt created successfully', receipt: newReceipt });
+    await receipt.save();
+    res.status(201).json(receipt);
   } catch (error) {
-    console.error("Error creating receipt:", error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
 app.get('/api/receipts', async (req, res) => {
-  try {
-    const { status } = req.query;
-    const filter = status ? { status } : {};
-    const receipts = await Receipt.find(filter).sort({ date: -1 });
-    res.json(receipts);
-  } catch (error) {
-    res.status(500).json({ message: 'Server error' });
-  }
+  const receipts = await Receipt.find().sort({ date: -1 });
+  res.json(receipts);
 });
 
 app.put('/api/receipts/:id', async (req, res) => {
   try {
     const { status } = req.body;
     const receipt = await Receipt.findById(req.params.id);
-    if (!receipt) return res.status(404).json({ message: 'Receipt not found' });
-
     if (receipt.status !== 'done' && status === 'done') {
       for (const item of receipt.items) {
         await Product.findByIdAndUpdate(item.productId, { $inc: { quantity: item.quantity } });
       }
     }
-    const updatedReceipt = await Receipt.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    res.json(updatedReceipt);
+    const updated = await Receipt.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    res.json(updated);
   } catch (error) {
-    console.error("Error updating receipt:", error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// --- DELIVERY ROUTES (Outgoing Stock) ---
-
+// --- DELIVERIES (OUT) ---
 app.post('/api/deliveries', async (req, res) => {
   try {
     const { customer, items, status } = req.body;
     const enrichedItems = [];
     for (const item of items) {
       const product = await Product.findById(item.productId);
-      if (!product) return res.status(404).json({ message: `Product ID ${item.productId} not found` });
-      enrichedItems.push({
-        productId: item.productId,
-        name: product.name,
-        quantity: item.quantity
-      });
+      if (!product) return res.status(404).json({ message: 'Product not found' });
+      enrichedItems.push({ productId: item.productId, name: product.name, quantity: item.quantity });
     }
 
     if (status === 'done') {
       for (const item of enrichedItems) {
-        const product = await Product.findById(item.productId);
-        if (product.quantity < item.quantity) {
-          return res.status(400).json({ message: `Insufficient stock for ${product.name}` });
-        }
-        product.quantity -= item.quantity;
-        await product.save();
+        const p = await Product.findById(item.productId);
+        if (p.quantity < item.quantity) return res.status(400).json({ message: `Insufficient stock: ${p.name}` });
+        p.quantity -= item.quantity;
+        await p.save();
       }
     }
-
-    const newDelivery = new Delivery({ customer, items: enrichedItems, status: status || 'draft' });
-    await newDelivery.save();
-    res.status(201).json({ message: 'Delivery created successfully', delivery: newDelivery });
+    const delivery = new Delivery({ customer, items: enrichedItems, status: status || 'draft' });
+    await delivery.save();
+    res.status(201).json(delivery);
   } catch (error) {
-    console.error("Error creating delivery:", error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
 app.get('/api/deliveries', async (req, res) => {
-  try {
-    const deliveries = await Delivery.find().sort({ date: -1 });
-    res.json(deliveries);
-  } catch (error) {
-    res.status(500).json({ message: 'Server error' });
-  }
+  const deliveries = await Delivery.find().sort({ date: -1 });
+  res.json(deliveries);
 });
 
 app.put('/api/deliveries/:id', async (req, res) => {
   try {
     const { status } = req.body;
     const delivery = await Delivery.findById(req.params.id);
-    if (!delivery) return res.status(404).json({ message: 'Delivery not found' });
-
+    
     if (delivery.status !== 'done' && status === 'done') {
       for (const item of delivery.items) {
-        const product = await Product.findById(item.productId);
-        if (!product || product.quantity < item.quantity) {
-          return res.status(400).json({ message: `Insufficient stock for ${item.name}` });
-        }
+        const p = await Product.findById(item.productId);
+        if (p.quantity < item.quantity) return res.status(400).json({ message: `Insufficient stock: ${item.name}` });
       }
       for (const item of delivery.items) {
         await Product.findByIdAndUpdate(item.productId, { $inc: { quantity: -item.quantity } });
       }
     }
-    const updatedDelivery = await Delivery.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    res.json(updatedDelivery);
+    const updated = await Delivery.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    res.json(updated);
   } catch (error) {
-    console.error("Error updating delivery:", error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// --- STOCK ADJUSTMENT ROUTES ---
-
+// --- ADJUSTMENTS ---
 app.post('/api/adjustments', async (req, res) => {
   try {
     const { reason, items } = req.body;
     const enrichedItems = [];
     for (const item of items) {
       const product = await Product.findById(item.productId);
-      if (!product) return res.status(404).json({ message: `Product ID ${item.productId} not found` });
-      enrichedItems.push({
-        productId: item.productId,
-        name: product.name,
-        quantity: Number(item.quantity)
-      });
+      enrichedItems.push({ productId: item.productId, name: product.name, quantity: Number(item.quantity) });
     }
 
     for (const item of enrichedItems) {
       await Product.findByIdAndUpdate(item.productId, { $inc: { quantity: item.quantity } });
     }
 
-    const newAdjustment = new Adjustment({ reason, items: enrichedItems });
-    await newAdjustment.save();
-    res.status(201).json({ message: 'Stock adjustment applied', adjustment: newAdjustment });
-  } catch (error) {
-    console.error("Error creating adjustment:", error);
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
-});
-
-app.get('/api/adjustments', async (req, res) => {
-  try {
-    const adjustments = await Adjustment.find().sort({ date: -1 });
-    res.json(adjustments);
+    const adjustment = new Adjustment({ reason, items: enrichedItems });
+    await adjustment.save();
+    res.status(201).json(adjustment);
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// --- TRANSFER ROUTES (Internal Moves) ---
+app.get('/api/adjustments', async (req, res) => {
+  const adjustments = await Adjustment.find().sort({ date: -1 });
+  res.json(adjustments);
+});
 
-// 1. Create Transfer
+// --- TRANSFERS (MOVE) ---
 app.post('/api/transfers', async (req, res) => {
   try {
     const { fromLocation, toLocation, items, status } = req.body;
@@ -372,7 +350,6 @@ app.post('/api/transfers', async (req, res) => {
       enrichedItems.push({ productId: item.productId, name: product.name, quantity: item.quantity });
     }
 
-    // Simple validation: Check global stock availability
     if (status === 'done') {
       for (const item of enrichedItems) {
         const p = await Product.findById(item.productId);
@@ -388,17 +365,11 @@ app.post('/api/transfers', async (req, res) => {
   }
 });
 
-// 2. Get Transfers
 app.get('/api/transfers', async (req, res) => {
-  try {
-    const transfers = await Transfer.find().sort({ date: -1 });
-    res.json(transfers);
-  } catch (error) {
-    res.status(500).json({ message: 'Server error' });
-  }
+  const transfers = await Transfer.find().sort({ date: -1 });
+  res.json(transfers);
 });
 
-// 3. Update Transfer (Validate)
 app.put('/api/transfers/:id', async (req, res) => {
   try {
     const { status } = req.body;
