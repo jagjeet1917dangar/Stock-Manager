@@ -19,13 +19,18 @@ import {
   MapPin
 } from "lucide-react";
 import { toast } from "sonner";
-import { apiFetch } from "@/lib/api"; // <--- Use helper
+import { apiFetch } from "@/lib/api";
 
-// ... (Types same as before)
 interface Product {
   _id: string;
   name: string;
-  quantity: number;
+  quantity: number; // Global Quantity
+}
+
+interface Location {
+  _id: string;
+  name: string;
+  type: string;
 }
 
 interface OperationItem {
@@ -49,13 +54,14 @@ interface Operation {
 
 const Operations = () => {
   const [products, setProducts] = useState<Product[]>([]);
+  const [locations, setLocations] = useState<Location[]>([]);
   const [operations, setOperations] = useState<Operation[]>([]); 
-  const [loading, setLoading] = useState(true);
   
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("receipts"); 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Form States
   const [partyName, setPartyName] = useState(""); 
   const [locFrom, setLocFrom] = useState(""); 
   const [locTo, setLocTo] = useState("");     
@@ -65,9 +71,9 @@ const Operations = () => {
 
   const fetchData = async () => {
     try {
-      // Replace fetches with apiFetch
-      const [prodRes, rcptRes, delRes, trfRes, adjRes] = await Promise.all([
+      const [prodRes, locRes, rcptRes, delRes, trfRes, adjRes] = await Promise.all([
         apiFetch("http://localhost:5000/api/products"),
+        apiFetch("http://localhost:5000/api/locations"),
         apiFetch("http://localhost:5000/api/receipts"),
         apiFetch("http://localhost:5000/api/deliveries"),
         apiFetch("http://localhost:5000/api/transfers"),
@@ -75,6 +81,7 @@ const Operations = () => {
       ]);
 
       if (prodRes.ok) setProducts(await prodRes.json());
+      if (locRes.ok) setLocations(await locRes.json());
       
       const allOps: Operation[] = [];
       if (rcptRes.ok) allOps.push(...(await rcptRes.json()).map((i: any) => ({ ...i, type: 'receipt' })));
@@ -85,10 +92,7 @@ const Operations = () => {
       setOperations(allOps.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
 
     } catch (error) {
-      console.error(error);
       toast.error("Failed to load operations");
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -96,9 +100,8 @@ const Operations = () => {
     fetchData();
   }, []);
 
-  // ... (addItem and removeItem Logic remains same)
   const addItem = () => {
-    if (!selectedProduct || qty === 0) return;
+    if (!selectedProduct || qty <= 0) return;
     const prod = products.find(p => p._id === selectedProduct);
     if (!prod) return;
     
@@ -134,8 +137,15 @@ const Operations = () => {
         break;
       case "transfers":
         endpoint = "/api/transfers";
-        body.fromLocation = locFrom;
-        body.toLocation = locTo;
+        // Look up the names from the IDs for the backend (or update backend to take IDs)
+        // Assuming Backend expects Names based on previous code, 
+        // BUT better to send Names if that's what the model expects.
+        // Let's send Names as string to match the Transfer Model provided earlier.
+        const fromLocObj = locations.find(l => l._id === locFrom);
+        const toLocObj = locations.find(l => l._id === locTo);
+        
+        body.fromLocation = fromLocObj ? fromLocObj.name : "";
+        body.toLocation = toLocObj ? toLocObj.name : "";
         body.status = 'draft';
         break;
       case "adjustments":
@@ -145,7 +155,6 @@ const Operations = () => {
     }
 
     try {
-      // Updated to use apiFetch
       const res = await apiFetch(`http://localhost:5000${endpoint}`, {
         method: "POST",
         body: JSON.stringify(body),
@@ -179,7 +188,6 @@ const Operations = () => {
     if (type === 'transfer') endpoint = "/api/transfers";
 
     try {
-      // Updated to use apiFetch
       const res = await apiFetch(`http://localhost:5000${endpoint}/${id}`, {
         method: "PUT",
         body: JSON.stringify({ status: "done" }),
@@ -197,7 +205,6 @@ const Operations = () => {
     }
   };
 
-  // ... (UI Helpers and Return JSX remain the same)
   const filteredOps = operations.filter(op => {
     if (activeTab === 'receipts') return op.type === 'receipt';
     if (activeTab === 'deliveries') return op.type === 'delivery';
@@ -257,17 +264,21 @@ const Operations = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>From Location</Label>
-                    <div className="relative">
-                      <MapPin className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                      <Input className="pl-9" placeholder="Warehouse A" value={locFrom} onChange={(e) => setLocFrom(e.target.value)} />
-                    </div>
+                    <Select value={locFrom} onValueChange={setLocFrom}>
+                      <SelectTrigger><SelectValue placeholder="Source" /></SelectTrigger>
+                      <SelectContent>
+                        {locations.map(l => <SelectItem key={l._id} value={l._id}>{l.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-2">
                     <Label>To Location</Label>
-                    <div className="relative">
-                      <MapPin className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                      <Input className="pl-9" placeholder="Warehouse B" value={locTo} onChange={(e) => setLocTo(e.target.value)} />
-                    </div>
+                    <Select value={locTo} onValueChange={setLocTo}>
+                      <SelectTrigger><SelectValue placeholder="Destination" /></SelectTrigger>
+                      <SelectContent>
+                        {locations.map(l => <SelectItem key={l._id} value={l._id}>{l.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               )}
@@ -278,7 +289,7 @@ const Operations = () => {
                   <Select value={selectedProduct} onValueChange={setSelectedProduct}>
                     <SelectTrigger><SelectValue placeholder="Select product" /></SelectTrigger>
                     <SelectContent>
-                      {products.map(p => <SelectItem key={p._id} value={p._id}>{p.name} (Stock: {p.quantity})</SelectItem>)}
+                      {products.map(p => <SelectItem key={p._id} value={p._id}>{p.name} (Total: {p.quantity})</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>

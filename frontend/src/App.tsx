@@ -8,6 +8,7 @@ import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Products from "./pages/Products";
 import Operations from "./pages/Operations";
+import Locations from "./pages/Locations"; // <--- IMPORT THIS
 import History from "./pages/History";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
@@ -25,9 +26,9 @@ const App = () => (
           <Route path="/dashboard" element={<AppLayout><Dashboard /></AppLayout>} />
           <Route path="/products" element={<AppLayout><Products /></AppLayout>} />
           <Route path="/operations/*" element={<AppLayout><Operations /></AppLayout>} />
+          <Route path="/locations" element={<AppLayout><Locations /></AppLayout>} /> {/* <--- ADD ROUTE */}
           <Route path="/history" element={<AppLayout><History /></AppLayout>} />
           <Route path="/settings" element={<AppLayout><Settings /></AppLayout>} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

@@ -12,6 +12,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
 import { 
   Dialog, 
   DialogContent, 
@@ -21,11 +26,20 @@ import {
   DialogTitle, 
   DialogTrigger 
 } from "@/components/ui/dialog";
-import { Plus, Search, Package, AlertCircle, CheckCircle2, Trash2, Loader2, Pencil } from "lucide-react";
+import { Plus, Search, Package, AlertCircle, CheckCircle2, Trash2, Loader2, Pencil, Warehouse } from "lucide-react";
 import { toast } from "sonner";
-import { apiFetch } from "@/lib/api"; // <--- Make sure this is imported
+import { apiFetch } from "@/lib/api";
 
 // --- Types ---
+interface StockEntry {
+  locationId: {
+    _id: string;
+    name: string;
+    type: string;
+  };
+  quantity: number;
+}
+
 interface Product {
   _id: string;
   name: string;
@@ -34,6 +48,7 @@ interface Product {
   quantity: number;
   minStock: number;
   unitOfMeasure: string;
+  stock: StockEntry[]; // <--- New Field
 }
 
 const Products = () => {
@@ -45,17 +60,10 @@ const Products = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null); 
 
-  // 1. Fetch Products (Using apiFetch)
   const fetchProducts = async () => {
     try {
-      // Use apiFetch to ensure x-user-id header is sent
       const response = await apiFetch("http://localhost:5000/api/products"); 
-      
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.message || "Failed to fetch");
-      }
-      
+      if (!response.ok) throw new Error("Failed to fetch");
       const data = await response.json();
       setProducts(data);
     } catch (error) {
@@ -80,7 +88,6 @@ const Products = () => {
     setIsDialogOpen(true);
   };
 
-  // 2. Save Product (Using apiFetch)
   const handleSaveProduct = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsSaving(true);
@@ -91,7 +98,7 @@ const Products = () => {
       sku: formData.get("sku"),
       category: formData.get("category"),
       unitOfMeasure: formData.get("unitOfMeasure"),
-      quantity: Number(formData.get("quantity")),
+      quantity: Number(formData.get("quantity")), // Initial Global Qty
       minStock: Number(formData.get("minStock")),
     };
 
@@ -102,7 +109,6 @@ const Products = () => {
       
       const method = editingProduct ? "PUT" : "POST";
 
-      // Use apiFetch here to include x-user-id header
       const response = await apiFetch(url, { 
         method: method,
         body: JSON.stringify(productData),
@@ -118,23 +124,16 @@ const Products = () => {
         toast.error(data.message || "Operation failed");
       }
     } catch (error) {
-      console.error(error);
       toast.error("Network error");
     } finally {
       setIsSaving(false);
     }
   };
 
-  // 3. Delete Product (Using apiFetch)
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this product?")) return;
-
     try {
-      // Use apiFetch here to include x-user-id header
-      const response = await apiFetch(`http://localhost:5000/api/products/${id}`, { 
-        method: "DELETE",
-      });
-
+      const response = await apiFetch(`http://localhost:5000/api/products/${id}`, { method: "DELETE" });
       if (response.ok) {
         toast.success("Product deleted");
         fetchProducts(); 
@@ -146,7 +145,6 @@ const Products = () => {
     }
   };
 
-  // ... (UI Helpers remain the same)
   const filteredProducts = products.filter(product =>
     product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     product.sku.toLowerCase().includes(searchQuery.toLowerCase())
@@ -169,15 +167,14 @@ const Products = () => {
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
             <Button className="shadow-soft" onClick={openAddDialog}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Product
+              <Plus className="h-4 w-4 mr-2" /> Add Product
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[600px]">
             <DialogHeader>
               <DialogTitle>{editingProduct ? "Edit Product" : "Add New Product"}</DialogTitle>
               <DialogDescription>
-                {editingProduct ? "Update the details of this product." : "Enter the details of the item you want to track."}
+                {editingProduct ? "Update details." : "Enter details to track."}
               </DialogDescription>
             </DialogHeader>
             
@@ -199,15 +196,25 @@ const Products = () => {
                   <Input id="category" name="category" defaultValue={editingProduct?.category} placeholder="e.g. Raw Material" required />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="unitOfMeasure">Unit (e.g. kg, pcs)</Label>
+                  <Label htmlFor="unitOfMeasure">Unit</Label>
                   <Input id="unitOfMeasure" name="unitOfMeasure" defaultValue={editingProduct?.unitOfMeasure} placeholder="kg" required />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="quantity">Stock Quantity</Label>
-                  <Input id="quantity" name="quantity" type="number" defaultValue={editingProduct?.quantity ?? 0} min="0" required />
+                  <Label htmlFor="quantity">Initial Stock</Label>
+                  <Input 
+                    id="quantity" 
+                    name="quantity" 
+                    type="number" 
+                    defaultValue={editingProduct?.quantity ?? 0} 
+                    min="0" 
+                    // Disable editing qty directly to force use of Operations (Receipts/Adjustments)
+                    disabled={!!editingProduct} 
+                    className={editingProduct ? "bg-muted" : ""}
+                  />
+                  {editingProduct && <p className="text-[10px] text-muted-foreground">Use 'Operations' to adjust stock.</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="minStock">Low Stock Alert</Label>
@@ -267,9 +274,7 @@ const Products = () => {
       <Card className="shadow-soft">
         <CardHeader>
           <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Product List</CardTitle>
-            </div>
+            <CardTitle>Product List</CardTitle>
             <div className="relative w-64">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -309,9 +314,38 @@ const Products = () => {
                     <TableCell className="font-medium">{product.name}</TableCell>
                     <TableCell className="text-muted-foreground">{product.sku}</TableCell>
                     <TableCell>{product.category}</TableCell>
-                    <TableCell className="text-right font-semibold">
-                      {product.quantity} <span className="text-xs font-normal text-muted-foreground">{product.unitOfMeasure}</span>
+                    
+                    {/* --- NEW: Hover to see Breakdown --- */}
+                    <TableCell className="text-right font-semibold cursor-help">
+                      <HoverCard>
+                        <HoverCardTrigger asChild>
+                          <span className="underline decoration-dotted decoration-muted-foreground/50">
+                            {product.quantity} <span className="text-xs font-normal text-muted-foreground">{product.unitOfMeasure}</span>
+                          </span>
+                        </HoverCardTrigger>
+                        <HoverCardContent className="w-60">
+                          <div className="space-y-2">
+                            <h4 className="text-sm font-semibold flex items-center">
+                              <Warehouse className="h-4 w-4 mr-2" /> Stock by Location
+                            </h4>
+                            <div className="text-sm space-y-1">
+                              {product.stock && product.stock.length > 0 ? (
+                                product.stock.map((s, idx) => (
+                                  <div key={idx} className="flex justify-between">
+                                    <span className="text-muted-foreground">{s.locationId?.name || "Unknown Loc"}</span>
+                                    <span className="font-medium">{s.quantity}</span>
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="text-muted-foreground text-xs">No specific location data</div>
+                              )}
+                            </div>
+                          </div>
+                        </HoverCardContent>
+                      </HoverCard>
                     </TableCell>
+                    {/* ----------------------------------- */}
+
                     <TableCell className="text-right text-muted-foreground">{product.minStock}</TableCell>
                     <TableCell>{getStatusBadge(product.quantity, product.minStock)}</TableCell>
                     <TableCell className="text-right">

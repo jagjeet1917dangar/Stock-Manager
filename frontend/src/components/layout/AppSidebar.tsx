@@ -1,9 +1,10 @@
 import { 
   LayoutDashboard, 
   Package, 
-  ArrowRightLeft, // New icon for Operations (Movements)
+  ArrowRightLeft, 
   Settings,
-  History
+  History,
+  MapPin // <--- IMPORT THIS
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -19,11 +20,11 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 
-// Consolidated menu items
 const menuItems = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Products", url: "/products", icon: Package },
-  { title: "Operations", url: "/operations", icon: ArrowRightLeft }, // Moved to top level
+  { title: "Operations", url: "/operations", icon: ArrowRightLeft },
+  { title: "Locations", url: "/locations", icon: MapPin }, // <--- ADD THIS
 ];
 
 const bottomItems = [
@@ -38,7 +39,6 @@ export function AppSidebar() {
   return (
     <Sidebar className="border-r border-sidebar-border">
       <SidebarContent>
-        {/* Logo */}
         <div className="p-4 border-b border-sidebar-border">
           <div className="flex items-center space-x-2">
             <div className="p-2 rounded-lg bg-primary">
@@ -50,14 +50,12 @@ export function AppSidebar() {
           </div>
         </div>
 
-        {/* Main Navigation */}
         <SidebarGroup>
           <SidebarGroupLabel>Main</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {menuItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
-                  {/* Used startsWith to keep "Operations" active even if on sub-routes */}
                   <SidebarMenuButton asChild isActive={location.pathname.startsWith(item.url)}>
                     <NavLink to={item.url}>
                       <item.icon className="h-4 w-4" />
@@ -70,7 +68,6 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Bottom Navigation */}
         <SidebarGroup className="mt-auto">
           <SidebarGroupContent>
             <SidebarMenu>

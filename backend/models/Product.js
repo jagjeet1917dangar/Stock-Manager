@@ -1,12 +1,23 @@
 import mongoose from 'mongoose';
 
 const ProductSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }, // <--- Added
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   name: { type: String, required: true },
-  sku: { type: String, required: true }, // Removed global 'unique' constraint here, we handle it per user in code
+  sku: { type: String, required: true },
   category: { type: String, required: true },
   unitOfMeasure: { type: String, required: true },
-  quantity: { type: Number, default: 0 },
+  
+  // Global Total (Cached for easy display on dashboard)
+  quantity: { type: Number, default: 0 }, 
+
+  // Detailed Stock per Location
+  stock: [
+    {
+      locationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Location' },
+      quantity: { type: Number, default: 0 }
+    }
+  ],
+
   minStock: { type: Number, default: 10 },
   createdAt: { type: Date, default: Date.now },
 });
