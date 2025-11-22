@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 import nodemailer from 'nodemailer';
 import User from './models/User.js';
+import Product from './models/Product.js';
 
 dotenv.config();
 const app = express();
@@ -152,6 +153,82 @@ app.post('/api/reset-password', async (req, res) => {
 
   } catch (error) {
     console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// --- PRODUCT ROUTES ---
+
+// 1. Create a New Product
+app.post('/api/products', async (req, res) => {
+  try {
+    const { name, sku, category, unitOfMeasure, quantity, minStock } = req.body;
+
+    // Check if SKU already exists
+    const existingProduct = await Product.findOne({ sku });
+    if (existingProduct) {
+      return res.status(400).json({ message: 'Product with this SKU already exists' });
+    }
+
+    const newProduct = new Product({
+      name,
+      sku,
+      category,
+      unitOfMeasure,
+      quantity: quantity || 0, // Default to 0 if not provided
+      minStock: minStock || 10
+    });
+
+    await newProduct.save();
+    res.status(201).json({ message: 'Product created successfully', product: newProduct });
+  } catch (error) {
+    console.error("Error creating product:", error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// 2. Get All Products
+app.get('/api/products', async (req, res) => {
+  try {
+    const products = await Product.find().sort({ createdAt: -1 }); // Newest first
+    res.json(products);
+  } catch (error) {
+    console.error("Error fetching products:", error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// 3. Get Single Product by ID
+app.get('/api/products/:id', async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    if (!product) return res.status(404).json({ message: 'Product not found' });
+    res.json(product);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// 4. Update Product
+app.put('/api/products/:id', async (req, res) => {
+  try {
+    const updatedProduct = await Product.findByIdAndUpdate(
+      req.params.id, 
+      req.body, 
+      { new: true } // Return the updated document
+    );
+    res.json(updatedProduct);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// 5. Delete Product
+app.delete('/api/products/:id', async (req, res) => {
+  try {
+    await Product.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Product deleted successfully' });
+  } catch (error) {
     res.status(500).json({ message: 'Server error' });
   }
 });
