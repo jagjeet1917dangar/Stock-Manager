@@ -1,53 +1,157 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useEffect, useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Package, AlertTriangle, TrendingUp, TrendingDown, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
+import { Package, AlertTriangle, ArrowDownToLine, ArrowUpFromLine, TrendingUp, TrendingDown } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { toast } from "sonner";
 
-const stockData = [
-  { name: "Mon", receipts: 45, deliveries: 32 },
-  { name: "Tue", receipts: 52, deliveries: 38 },
-  { name: "Wed", receipts: 38, deliveries: 45 },
-  { name: "Thu", receipts: 65, deliveries: 42 },
-  { name: "Fri", receipts: 48, deliveries: 55 },
-  { name: "Sat", receipts: 35, deliveries: 28 },
-  { name: "Sun", receipts: 28, deliveries: 22 },
-];
+// --- Types ---
+interface Product {
+  _id: string;
+  name: string;
+  quantity: number;
+  minStock: number;
+  category: string;
+}
 
-const categoryData = [
-  { name: "Electronics", value: 450, color: "hsl(var(--primary))" },
-  { name: "Furniture", value: 320, color: "hsl(var(--accent))" },
-  { name: "Office Supplies", value: 280, color: "hsl(var(--warning))" },
-  { name: "Others", value: 150, color: "hsl(var(--muted-foreground))" },
-];
+interface Item {
+  name: string;
+  quantity: number;
+}
 
-const recentActivity = [
-  { id: 1, type: "receipt", product: "MacBook Pro 16\"", qty: 10, time: "2 hours ago", status: "completed" },
-  { id: 2, type: "delivery", product: "Office Chair Ergonomic", qty: 5, time: "3 hours ago", status: "completed" },
-  { id: 3, type: "transfer", product: "Wireless Mouse", qty: 25, time: "5 hours ago", status: "in-progress" },
-  { id: 4, type: "adjustment", product: "USB-C Cable", qty: -3, time: "6 hours ago", status: "completed" },
-];
+interface Receipt {
+  _id: string;
+  type: 'receipt';
+  supplier: string;
+  status: string;
+  date: string;
+  items: Item[];
+}
+
+interface Delivery {
+  _id: string;
+  type: 'delivery';
+  customer: string;
+  status: string;
+  date: string;
+  items: Item[];
+}
+
+// Union type for activity feed
+type Activity = Receipt | Delivery;
+
+// --- Chart Colors ---
+const COLORS = ["hsl(var(--primary))", "hsl(var(--accent))", "hsl(var(--warning))", "hsl(var(--destructive))", "#8884d8"];
 
 const Dashboard = () => {
+  // --- State ---
+  const [products, setProducts] = useState<Product[]>([]);
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // --- Fetch Data ---
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        // Run all fetches in parallel for speed
+        const [prodRes, receiptRes, deliveryRes] = await Promise.all([
+          fetch("http://localhost:5000/api/products"),
+          fetch("http://localhost:5000/api/receipts"),
+          fetch("http://localhost:5000/api/deliveries")
+        ]);
+
+        const prodData = await prodRes.json();
+        const receiptData = await receiptRes.json();
+        const deliveryData = await deliveryRes.json();
+
+        if (prodRes.ok) setProducts(prodData);
+        if (receiptRes.ok) setReceipts(receiptData);
+        if (deliveryRes.ok) setDeliveries(deliveryData);
+
+      } catch (error) {
+        console.error("Dashboard fetch error:", error);
+        toast.error("Failed to load dashboard data. Is backend running?");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  // --- Calculate KPIs ---
+  
+  // 1. Product Stats
+  const totalProducts = products.length;
+  const lowStockCount = products.filter(
+    (p) => p.quantity > 0 && p.quantity <= p.minStock
+  ).length;
+
+  // 2. Operation Stats (Pending = Not 'done')
+  const pendingReceiptsCount = receipts.filter(r => r.status !== "done").length;
+  const pendingDeliveriesCount = deliveries.filter(d => d.status !== "done").length;
+
+  // 3. Pie Chart Data (Stock by Category)
+  const categoryStats = products.reduce((acc: Record<string, number>, curr) => {
+    acc[curr.category] = (acc[curr.category] || 0) + curr.quantity;
+    return acc;
+  }, {});
+
+  const categoryData = Object.keys(categoryStats).map((key) => ({
+    name: key,
+    value: categoryStats[key],
+  }));
+
+  // 4. Recent Activity Feed (Merge Receipts & Deliveries)
+  const recentActivity = [...receipts, ...deliveries]
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .slice(0, 5) // Top 5 most recent
+    .map(item => {
+      const isReceipt = item.type === 'receipt'; // Determine type safely
+      const partyName = isReceipt ? (item as Receipt).supplier : (item as Delivery).customer;
+      
+      return {
+        id: item._id,
+        type: isReceipt ? "receipt" : "delivery",
+        title: isReceipt ? `Received from ${partyName}` : `Delivered to ${partyName}`,
+        desc: `${item.items.length} items (${item.items.map(i => i.name).join(", ").slice(0, 30)}...)`,
+        qty: item.items.reduce((sum, i) => sum + i.quantity, 0),
+        date: new Date(item.date).toLocaleDateString(),
+        status: item.status
+      };
+    });
+
+  // 5. Bar Chart Data (Mocked slightly based on real counts for visualization)
+  // Note: Real daily history requires a separate "History/Log" collection which gathers data over time.
+  const stockChartData = [
+    { name: "Mon", receipts: 4, deliveries: 2 },
+    { name: "Tue", receipts: 3, deliveries: 5 },
+    { name: "Wed", receipts: 2, deliveries: 3 },
+    { name: "Thu", receipts: 6, deliveries: 4 },
+    { name: "Fri", receipts: 4, deliveries: 7 },
+    { name: "Sat", receipts: receipts.length, deliveries: deliveries.length }, // Showing total counts for "Today/Sat" as demo
+    { name: "Sun", receipts: 0, deliveries: 0 },
+  ];
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
-          <p className="text-muted-foreground mt-1">Welcome back! Here's your inventory overview.</p>
+          <p className="text-muted-foreground mt-1">Real-time inventory overview.</p>
         </div>
         <div className="flex items-center space-x-2">
           <Select defaultValue="7days">
-            <SelectTrigger className="w-[180px]">
+            <SelectTrigger className="w-[150px]">
               <SelectValue placeholder="Select period" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="today">Today</SelectItem>
               <SelectItem value="7days">Last 7 days</SelectItem>
               <SelectItem value="30days">Last 30 days</SelectItem>
-              <SelectItem value="90days">Last 90 days</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -55,56 +159,61 @@ const Dashboard = () => {
 
       {/* KPI Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        
+        {/* Total Products */}
         <Card className="shadow-soft hover:shadow-medium transition-smooth border-l-4 border-l-primary">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Total Products</CardTitle>
             <Package className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">1,284</div>
+            <div className="text-2xl font-bold">{isLoading ? "..." : totalProducts}</div>
             <p className="text-xs text-muted-foreground flex items-center mt-1">
               <TrendingUp className="h-3 w-3 mr-1 text-accent" />
-              +12% from last month
+              Active items
             </p>
           </CardContent>
         </Card>
 
+        {/* Low Stock */}
         <Card className="shadow-soft hover:shadow-medium transition-smooth border-l-4 border-l-warning">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Low Stock Items</CardTitle>
             <AlertTriangle className="h-4 w-4 text-warning" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">23</div>
+            <div className="text-2xl font-bold">{isLoading ? "..." : lowStockCount}</div>
             <p className="text-xs text-muted-foreground flex items-center mt-1">
               <TrendingDown className="h-3 w-3 mr-1 text-warning" />
-              Needs attention
+              Needs reordering
             </p>
           </CardContent>
         </Card>
 
+        {/* Pending Receipts */}
         <Card className="shadow-soft hover:shadow-medium transition-smooth border-l-4 border-l-accent">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Pending Receipts</CardTitle>
             <ArrowDownToLine className="h-4 w-4 text-accent" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">8</div>
+            <div className="text-2xl font-bold">{isLoading ? "..." : pendingReceiptsCount}</div>
             <p className="text-xs text-muted-foreground flex items-center mt-1">
-              Awaiting validation
+              Incoming stock
             </p>
           </CardContent>
         </Card>
 
+        {/* Pending Deliveries */}
         <Card className="shadow-soft hover:shadow-medium transition-smooth border-l-4 border-l-destructive">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Pending Deliveries</CardTitle>
             <ArrowUpFromLine className="h-4 w-4 text-destructive" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">12</div>
+            <div className="text-2xl font-bold">{isLoading ? "..." : pendingDeliveriesCount}</div>
             <p className="text-xs text-muted-foreground flex items-center mt-1">
-              Ready to ship
+              Outgoing stock
             </p>
           </CardContent>
         </Card>
@@ -115,12 +224,12 @@ const Dashboard = () => {
         {/* Bar Chart */}
         <Card className="lg:col-span-4 shadow-soft">
           <CardHeader>
-            <CardTitle>Stock Movement</CardTitle>
-            <CardDescription>Weekly receipts vs deliveries</CardDescription>
+            <CardTitle>Weekly Overview</CardTitle>
+            <p className="text-sm text-muted-foreground">Receipts vs Deliveries</p>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={stockData}>
+              <BarChart data={stockChartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                 <XAxis dataKey="name" stroke="hsl(var(--muted-foreground))" />
                 <YAxis stroke="hsl(var(--muted-foreground))" />
@@ -132,8 +241,8 @@ const Dashboard = () => {
                   }}
                 />
                 <Legend />
-                <Bar dataKey="receipts" fill="hsl(var(--accent))" radius={[8, 8, 0, 0]} />
-                <Bar dataKey="deliveries" fill="hsl(var(--primary))" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="receipts" name="Receipts" fill="hsl(var(--accent))" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="deliveries" name="Deliveries" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -143,7 +252,7 @@ const Dashboard = () => {
         <Card className="lg:col-span-3 shadow-soft">
           <CardHeader>
             <CardTitle>Stock by Category</CardTitle>
-            <CardDescription>Distribution of inventory</CardDescription>
+            <p className="text-sm text-muted-foreground">Distribution by Quantity</p>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
@@ -153,62 +262,56 @@ const Dashboard = () => {
                   cx="50%"
                   cy="50%"
                   labelLine={false}
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  label={({ name, percent }) => percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : ''}
                   outerRadius={80}
                   fill="hsl(var(--primary))"
                   dataKey="value"
                 >
                   {categoryData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: "hsl(var(--popover))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "var(--radius)"
-                  }}
-                />
+                <Tooltip />
               </PieChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
       </div>
 
-      {/* Recent Activity */}
+      {/* Recent Activity List */}
       <Card className="shadow-soft">
         <CardHeader>
           <CardTitle>Recent Activity</CardTitle>
-          <CardDescription>Latest stock movements and operations</CardDescription>
+          <p className="text-sm text-muted-foreground">Latest movements (Receipts & Deliveries)</p>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {recentActivity.map((activity) => (
-              <div key={activity.id} className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-muted/50 transition-smooth">
-                <div className="flex items-center space-x-4">
-                  <div className={`p-2 rounded-lg ${
-                    activity.type === 'receipt' ? 'bg-accent/10' :
-                    activity.type === 'delivery' ? 'bg-primary/10' :
-                    activity.type === 'transfer' ? 'bg-warning/10' :
-                    'bg-muted'
-                  }`}>
-                    {activity.type === 'receipt' && <ArrowDownToLine className="h-4 w-4 text-accent" />}
-                    {activity.type === 'delivery' && <ArrowUpFromLine className="h-4 w-4 text-primary" />}
-                    {activity.type === 'transfer' && <Package className="h-4 w-4 text-warning" />}
-                    {activity.type === 'adjustment' && <AlertTriangle className="h-4 w-4 text-muted-foreground" />}
+            {recentActivity.length === 0 ? (
+              <p className="text-center text-muted-foreground py-4">No recent activity found.</p>
+            ) : (
+              recentActivity.map((activity) => (
+                <div key={activity.id} className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-muted/50 transition-smooth">
+                  <div className="flex items-center space-x-4">
+                    <div className={`p-2 rounded-lg ${activity.type === 'receipt' ? 'bg-accent/10' : 'bg-destructive/10'}`}>
+                      {activity.type === 'receipt' 
+                        ? <ArrowDownToLine className="h-4 w-4 text-accent" />
+                        : <ArrowUpFromLine className="h-4 w-4 text-destructive" />
+                      }
+                    </div>
+                    <div>
+                      <p className="font-medium text-foreground">{activity.title}</p>
+                      <p className="text-xs text-muted-foreground">{activity.desc}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-medium text-foreground">{activity.product}</p>
-                    <p className="text-sm text-muted-foreground">
-                      Quantity: {activity.qty > 0 ? '+' : ''}{activity.qty} • {activity.time}
-                    </p>
+                  <div className="text-right">
+                    <Badge variant={activity.status === 'done' ? 'default' : 'secondary'}>
+                      {activity.status}
+                    </Badge>
+                    <p className="text-xs text-muted-foreground mt-1">{activity.date}</p>
                   </div>
                 </div>
-                <Badge variant={activity.status === 'completed' ? 'default' : 'secondary'}>
-                  {activity.status}
-                </Badge>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </CardContent>
       </Card>
