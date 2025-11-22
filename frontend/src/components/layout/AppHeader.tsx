@@ -18,9 +18,8 @@ import {
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useNavigate } from "react-router-dom";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { apiFetch } from "@/lib/api"; // <--- Import
+import { apiFetch } from "@/lib/api"; 
 
-// ... (Interfaces remain the same)
 interface Product {
   _id: string;
   name: string;
@@ -44,13 +43,24 @@ export const AppHeader = () => {
   useEffect(() => {
     const checkStockLevels = async () => {
       try {
-        // Use apiFetch to include x-user-id header
+        // 1. Get User Settings for Global Threshold
+        const userStr = localStorage.getItem("user");
+        const user = userStr ? JSON.parse(userStr) : null;
+        // Use the global setting, or default to 10 if not found
+        const globalThreshold = user?.lowStockThreshold ?? 10;
+
+        // 2. Fetch Products
         const res = await apiFetch("http://localhost:5000/api/products");
         if (res.ok) {
           const products: Product[] = await res.json();
           const newNotifications: Notification[] = [];
 
           products.forEach(product => {
+            // Determine the threshold to use. 
+            // Currently prioritizing the Global User Setting for the "specific amount" logic.
+            // You could also use Math.max(product.minStock, globalThreshold) if you wanted to respect both.
+            const threshold = globalThreshold;
+
             if (product.quantity === 0) {
               newNotifications.push({
                 id: `out-${product._id}`,
@@ -59,11 +69,11 @@ export const AppHeader = () => {
                 time: "Just now",
                 read: false
               });
-            } else if (product.quantity <= product.minStock) {
+            } else if (product.quantity <= threshold) {
               newNotifications.push({
                 id: `low-${product._id}`,
                 title: "Low Stock Alert",
-                description: `${product.name} is running low (${product.quantity} left)`,
+                description: `${product.name} is low (below ${threshold})`,
                 time: "Just now",
                 read: false
               });
@@ -74,16 +84,16 @@ export const AppHeader = () => {
           setUnreadCount(newNotifications.length);
         }
       } catch (error) {
-        console.error("Failed to fetch notifications");
+        console.error("Failed to fetch notifications", error);
       }
     };
 
+    // Run immediately and then every 60 seconds
     checkStockLevels();
     const interval = setInterval(checkStockLevels, 60000);
     return () => clearInterval(interval);
   }, []);
 
-  // ... (Rest of the component remains EXACTLY same)
   const markAllRead = () => {
     setUnreadCount(0);
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
@@ -167,7 +177,10 @@ export const AppHeader = () => {
             </DropdownMenuItem>
             <DropdownMenuItem>Team Settings</DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => navigate("/")}>
+            <DropdownMenuItem onClick={() => {
+              localStorage.removeItem("user");
+              navigate("/");
+            }}>
               Logout
             </DropdownMenuItem>
           </DropdownMenuContent>

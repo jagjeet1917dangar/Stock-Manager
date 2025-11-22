@@ -5,9 +5,9 @@ import { Package, AlertTriangle, ArrowDownToLine, ArrowUpFromLine, TrendingUp, T
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { toast } from "sonner";
-import { apiFetch } from "@/lib/api"; // <--- Import
+import { apiFetch } from "@/lib/api";
 
-// ... (Types & Constants remain same)
+// --- Types ---
 interface Product {
   _id: string;
   name: string;
@@ -46,11 +46,13 @@ const Dashboard = () => {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Filter State
+  const [timeRange, setTimeRange] = useState("7days");
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Update URLs to use apiFetch which handles headers
         const [prodRes, receiptRes, deliveryRes] = await Promise.all([
           apiFetch("http://localhost:5000/api/products"),
           apiFetch("http://localhost:5000/api/receipts"),
@@ -72,10 +74,46 @@ const Dashboard = () => {
     fetchData();
   }, []);
 
-  // ... (Rest of file remains EXACTLY the same as previous version, just logic)
-  
+  // --- Filter Logic ---
+  const filterDataByTime = <T extends { date: string }>(data: T[]) => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()); // Midnight today
+
+    return data.filter(item => {
+      const itemDate = new Date(item.date);
+      
+      switch (timeRange) {
+        case "today":
+          return itemDate >= todayStart;
+        case "7days": {
+          const sevenDaysAgo = new Date(now);
+          sevenDaysAgo.setDate(now.getDate() - 7);
+          return itemDate >= sevenDaysAgo;
+        }
+        case "30days": {
+          const thirtyDaysAgo = new Date(now);
+          thirtyDaysAgo.setDate(now.getDate() - 30);
+          return itemDate >= thirtyDaysAgo;
+        }
+        case "90days": {
+          const ninetyDaysAgo = new Date(now);
+          ninetyDaysAgo.setDate(now.getDate() - 90);
+          return itemDate >= ninetyDaysAgo;
+        }
+        default:
+          return true;
+      }
+    });
+  };
+
+  // Use memoized filtered data for charts and lists
+  const filteredReceipts = useMemo(() => filterDataByTime(receipts), [receipts, timeRange]);
+  const filteredDeliveries = useMemo(() => filterDataByTime(deliveries), [deliveries, timeRange]);
+
   // --- Calculate Chart Data ---
   const chartData = useMemo(() => {
+    // For "Today", showing "Mon-Sun" isn't very useful, maybe show hourly? 
+    // But keeping "Mon-Sun" is safer for simplicity.
     const data = [
       { name: "Mon", receipts: 0, deliveries: 0 },
       { name: "Tue", receipts: 0, deliveries: 0 },
@@ -91,25 +129,32 @@ const Dashboard = () => {
       return (day + 6) % 7; 
     };
 
-    receipts.forEach(r => {
+    filteredReceipts.forEach(r => {
       const idx = getDayIndex(r.date);
       const totalQty = r.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
       data[idx].receipts += totalQty;
     });
 
-    deliveries.forEach(d => {
+    filteredDeliveries.forEach(d => {
       const idx = getDayIndex(d.date);
       const totalQty = d.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
       data[idx].deliveries += totalQty;
     });
 
     return data;
-  }, [receipts, deliveries]);
+  }, [filteredReceipts, filteredDeliveries]); // Depend on filtered data
 
+  // --- Calculate KPIs ---
+  // Note: Total Products & Low Stock usually reflect *current* state, not history, 
+  // so we typically don't filter products by date unless tracking "New Products added".
+  // However, Receipts/Deliveries KPIs SHOULD be filtered.
+  
   const totalProducts = products.length;
   const lowStockCount = products.filter(p => p.quantity > 0 && p.quantity <= p.minStock).length;
-  const pendingReceiptsCount = receipts.filter(r => r.status !== "done").length;
-  const pendingDeliveriesCount = deliveries.filter(d => d.status !== "done").length;
+  
+  // KPIs based on filtered data (e.g., "Pending receipts created in last 7 days")
+  const pendingReceiptsCount = filteredReceipts.filter(r => r.status !== "done").length;
+  const pendingDeliveriesCount = filteredDeliveries.filter(d => d.status !== "done").length;
 
   const categoryStats = products.reduce((acc: Record<string, number>, curr) => {
     acc[curr.category] = (acc[curr.category] || 0) + curr.quantity;
@@ -121,7 +166,7 @@ const Dashboard = () => {
     value: categoryStats[key],
   }));
 
-  const recentActivity = [...receipts, ...deliveries]
+  const recentActivity = [...filteredReceipts, ...filteredDeliveries]
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, 5)
     .map(item => {
@@ -141,13 +186,14 @@ const Dashboard = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
           <p className="text-muted-foreground mt-1">Real-time inventory overview.</p>
         </div>
         <div className="flex items-center space-x-2">
-          <Select defaultValue="7days">
+          <Select value={timeRange} onValueChange={setTimeRange}>
             <SelectTrigger className="w-[150px]">
               <SelectValue placeholder="Select period" />
             </SelectTrigger>
@@ -155,11 +201,13 @@ const Dashboard = () => {
               <SelectItem value="today">Today</SelectItem>
               <SelectItem value="7days">Last 7 days</SelectItem>
               <SelectItem value="30days">Last 30 days</SelectItem>
+              <SelectItem value="90days">Last 90 days</SelectItem>
             </SelectContent>
           </Select>
         </div>
       </div>
 
+      {/* KPI Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card className="shadow-soft hover:shadow-medium transition-smooth border-l-4 border-l-primary">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -216,11 +264,13 @@ const Dashboard = () => {
         </Card>
       </div>
 
+      {/* Charts Row */}
       <div className="grid gap-4 lg:grid-cols-7">
+        {/* Bar Chart */}
         <Card className="lg:col-span-4 shadow-soft">
           <CardHeader>
-            <CardTitle>Stock Movement (This Week)</CardTitle>
-            <p className="text-sm text-muted-foreground">Total items received vs delivered</p>
+            <CardTitle>Stock Movement</CardTitle>
+            <p className="text-sm text-muted-foreground">Receipts vs Deliveries ({timeRange === "today" ? "Today" : timeRange})</p>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
@@ -243,10 +293,11 @@ const Dashboard = () => {
           </CardContent>
         </Card>
 
+        {/* Pie Chart */}
         <Card className="lg:col-span-3 shadow-soft">
           <CardHeader>
             <CardTitle>Stock by Category</CardTitle>
-            <p className="text-sm text-muted-foreground">Distribution by Quantity</p>
+            <p className="text-sm text-muted-foreground">Current Distribution</p>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
@@ -272,15 +323,16 @@ const Dashboard = () => {
         </Card>
       </div>
 
+      {/* Recent Activity List */}
       <Card className="shadow-soft">
         <CardHeader>
           <CardTitle>Recent Activity</CardTitle>
-          <p className="text-sm text-muted-foreground">Latest movements (Receipts & Deliveries)</p>
+          <p className="text-sm text-muted-foreground">Latest movements ({timeRange})</p>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
             {recentActivity.length === 0 ? (
-              <p className="text-center text-muted-foreground py-4">No recent activity found.</p>
+              <p className="text-center text-muted-foreground py-4">No recent activity in this period.</p>
             ) : (
               recentActivity.map((activity) => (
                 <div key={activity.id} className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-muted/50 transition-smooth">

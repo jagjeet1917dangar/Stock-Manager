@@ -19,11 +19,32 @@ app.use(cors());
 app.use(express.json());
 
 // Database Connection
-// FIX: Added "/stockmaster" database name to prevent "Invalid scheme" error
 const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://jagjeetdangarcg_db_user:XnGXs5wUbVBRE2Ek@cluster0.gqm0mb6.mongodb.net/stockmaster?retryWrites=true&w=majority';
 
 mongoose.connect(MONGO_URI)
-  .then(() => console.log('MongoDB Connected'))
+  .then(async () => {
+    console.log('MongoDB Connected');
+
+    // --- FIX START: Drop the old global "sku_1" index if it exists ---
+    try {
+      const collection = mongoose.connection.collection('products');
+      const indexes = await collection.indexes();
+      
+      // Look for an index that is just { sku: 1 } (without userId)
+      // This is the "bad" index causing your Duplicate Key Error
+      const badIndex = indexes.find(idx => idx.key.sku === 1 && !Object.keys(idx.key).includes('userId'));
+
+      if (badIndex) {
+        console.log(`Found incompatible global index: ${badIndex.name}. Dropping it...`);
+        await collection.dropIndex(badIndex.name);
+        console.log('Successfully dropped global SKU index. Per-user SKU logic will work now.');
+      }
+    } catch (error) {
+      // If index doesn't exist or permission error, just continue
+      console.log('Index auto-fix check skipped:', error.message);
+    }
+    // --- FIX END ---
+  })
   .catch(err => console.error('MongoDB Connection Error:', err));
 
 // --- NODEMAILER CONFIGURATION ---
@@ -45,7 +66,7 @@ const getUserId = (req) => {
 
 // ================= ROUTES =================
 
-// --- AUTH ROUTES (No Change needed, they are global) ---
+// --- AUTH ROUTES ---
 app.post('/api/signup', async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -196,7 +217,10 @@ app.post('/api/products', async (req, res) => {
     await product.save();
     res.status(201).json({ message: 'Product created', product });
   } catch (error) {
-    res.status(500).json({ message: 'Server error' });
+    // FIX: Log the real error to help debugging
+    console.error("Product Create Error:", error); 
+    // Send the actual error message if possible
+    res.status(500).json({ message: error.message || 'Server error' });
   }
 });
 

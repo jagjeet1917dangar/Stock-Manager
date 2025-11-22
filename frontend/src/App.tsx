@@ -11,7 +11,6 @@ import Operations from "./pages/Operations";
 import History from "./pages/History";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
-import Adjustments from "./pages/Adjustments";
 
 const queryClient = new QueryClient();
 
@@ -28,7 +27,6 @@ const App = () => (
           <Route path="/operations/*" element={<AppLayout><Operations /></AppLayout>} />
           <Route path="/history" element={<AppLayout><History /></AppLayout>} />
           <Route path="/settings" element={<AppLayout><Settings /></AppLayout>} />
-          <Route path="/operations/adjustments" element={<AppLayout><Adjustments /></AppLayout>} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

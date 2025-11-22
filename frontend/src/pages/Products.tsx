@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -23,9 +23,9 @@ import {
 } from "@/components/ui/dialog";
 import { Plus, Search, Package, AlertCircle, CheckCircle2, Trash2, Loader2, Pencil } from "lucide-react";
 import { toast } from "sonner";
-import { apiFetch } from "@/lib/api"; // <--- Use helper
+import { apiFetch } from "@/lib/api"; // <--- Make sure this is imported
 
-// ... (Types remain same)
+// --- Types ---
 interface Product {
   _id: string;
   name: string;
@@ -45,10 +45,17 @@ const Products = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null); 
 
+  // 1. Fetch Products (Using apiFetch)
   const fetchProducts = async () => {
     try {
-      const response = await apiFetch("http://localhost:5000/api/products"); // <--- Updated
-      if (!response.ok) throw new Error("Failed to fetch");
+      // Use apiFetch to ensure x-user-id header is sent
+      const response = await apiFetch("http://localhost:5000/api/products"); 
+      
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.message || "Failed to fetch");
+      }
+      
       const data = await response.json();
       setProducts(data);
     } catch (error) {
@@ -73,6 +80,7 @@ const Products = () => {
     setIsDialogOpen(true);
   };
 
+  // 2. Save Product (Using apiFetch)
   const handleSaveProduct = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsSaving(true);
@@ -94,7 +102,8 @@ const Products = () => {
       
       const method = editingProduct ? "PUT" : "POST";
 
-      const response = await apiFetch(url, { // <--- Updated
+      // Use apiFetch here to include x-user-id header
+      const response = await apiFetch(url, { 
         method: method,
         body: JSON.stringify(productData),
       });
@@ -109,17 +118,20 @@ const Products = () => {
         toast.error(data.message || "Operation failed");
       }
     } catch (error) {
+      console.error(error);
       toast.error("Network error");
     } finally {
       setIsSaving(false);
     }
   };
 
+  // 3. Delete Product (Using apiFetch)
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this product?")) return;
 
     try {
-      const response = await apiFetch(`http://localhost:5000/api/products/${id}`, { // <--- Updated
+      // Use apiFetch here to include x-user-id header
+      const response = await apiFetch(`http://localhost:5000/api/products/${id}`, { 
         method: "DELETE",
       });
 
@@ -134,7 +146,7 @@ const Products = () => {
     }
   };
 
-  // ... (Rest of UI remains identical, filteredProducts logic etc.)
+  // ... (UI Helpers remain the same)
   const filteredProducts = products.filter(product =>
     product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     product.sku.toLowerCase().includes(searchQuery.toLowerCase())
